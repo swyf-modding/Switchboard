@@ -287,7 +287,13 @@ namespace Switchboard
             lines.Append("if not errorlevel 1 goto done\r\n");
             lines.Append("set /a COUNT+=1\r\n");
             lines.Append("if %COUNT% GEQ 120 goto failed\r\n");
-            lines.Append("timeout /t 1 /nobreak > nul\r\n");
+            // A ping, not timeout: timeout refuses to run when stdin or stdout is redirected, and
+            // this script is started with both piped so that nothing it prints reaches a pipe
+            // nobody drains. It failed with "input redirection is not supported" immediately, so
+            // the retry loop burned its 120 attempts in well under a second and gave up before the
+            // program holding the file had finished exiting - which is to say the update never
+            // applied. ping has no console to need; -n 2 is one round trip and about a second.
+            lines.Append("\"%SystemRoot%\\System32\\ping.exe\" -n 2 127.0.0.1 > nul 2>&1\r\n");
             lines.Append("goto copy\r\n");
             lines.Append(":done\r\n");
             lines.Append("del /q \"%NEW%\" > nul 2>&1\r\n");
