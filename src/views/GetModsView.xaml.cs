@@ -7,6 +7,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Controls;
+using Avalonia.Media;
 using Avalonia.Threading;
 
 namespace Switchboard.Views
@@ -18,18 +19,40 @@ namespace Switchboard.Views
     /// Observable because the installed column is re-read from disk after every install and after any
     /// change on the Mods tab. The old version mutated the sub-item text in place, which worked but left
     /// no way to tell the list that it had changed.
+    ///
+    /// A row carries three versions, not one: the release the list makes installable, GitHub's newest
+    /// release, and what is in the file on disk. They are held together in <see cref="Versions"/> so the
+    /// columns and the sentence under the list cannot disagree about which of them differ.
     /// </remarks>
     internal sealed class ReleaseRow : INotifyPropertyChanged
     {
-        private string _installed;
+        private readonly string _newestProblem;
+        private InstalledMod _installed;
+        private ModVersions _versions;
 
-        public ReleaseRow(ReleaseInfo release, string installed)
+        public ReleaseRow(ReleaseInfo release, ReleaseInfo newest, string newestProblem, InstalledMod installed)
         {
             Release = release;
+            Newest = newest;
+            _newestProblem = newestProblem;
             _installed = installed;
+            _versions = new ModVersions(release.Source, newest != null ? newest.TagName : null,
+                                        installed != null ? installed.Version : null);
         }
 
+        /// <summary>The release Install installs: the pinned one when the entry pins one.</summary>
         public ReleaseInfo Release { get; private set; }
+
+        /// <summary>
+        /// GitHub's newest release, when it could be read. Null when the lookup failed - which is a
+        /// row that still offers the listed release rather than one that disappears from the list.
+        /// </summary>
+        public ReleaseInfo Newest { get; private set; }
+
+        /// <summary>Why GitHub's newest release could not be read, or null.</summary>
+        public string NewestProblem { get { return _newestProblem; } }
+
+        public ModVersions Versions { get { return _versions; } }
 
         /// <summary>
         /// The name with its owner when the mod comes from outside the project: a third-party entry
@@ -62,19 +85,143 @@ namespace Switchboard.Views
             }
         }
 
-        public string Installed
+        /// <summary>
+        /// GitHub's newest release, and whether it is the release the list lists. The suffix is the
+        /// deviation this column exists to show: "v1.4.0 (newer)" beside a listed "v1.2.1", rather
+        /// than two tags the eye has to compare itself.
+        /// </summary>
+        public string Latest
         {
-            get { return _installed; }
-            set
+            get
             {
-                if (_installed == value) return;
-                _installed = value;
-                var handler = PropertyChanged;
-                if (handler != null) handler(this, new PropertyChangedEventArgs("Installed"));
+                if (_versions.Latest == null) return "unknown";
+                if (!_versions.LatestDiffers) return _versions.Latest;
+
+                return _versions.Latest + (_versions.LatestIsNewer ? " (newer)" : " (differs)");
             }
         }
 
+        /// <summary>Whether this row offers installing GitHub's newest release over the pin.</summary>
+        public bool CanInstallLatest
+        {
+            get { return Newest != null && _versions.LatestIsNewer; }
+        }
+
+        /// <summary>
+        /// What is installed, in the terms that matter: the version inside the file, and whether that
+        /// is the release the list lists. "installed" on its own hides the interesting case - the right
+        /// files, the wrong release - and that is the one a person needs told.
+        /// </summary>
+        public string Installed
+        {
+            get
+            {
+                if (_installed == null || !_installed.Any) return "not installed";
+
+                if (!_installed.Complete)
+                {
+                    return "partly (" + _installed.Present + "/" + _installed.Expected + ")";
+                }
+
+                if (!_installed.Intact)
+                {
+                    return (string.IsNullOrEmpty(_installed.Version) ? "installed" : _installed.Version) + " (differs)";
+                }
+
+                var version = string.IsNullOrEmpty(_installed.Version) ? "installed" : _installed.Version;
+                return _versions.LocalDiffers ? version + " (not listed)" : version;
+            }
+        }
+
+        /// <summary>
+        /// The Latest cell goes loud only when it differs, so a list of current mods stays quiet and
+        /// the one entry out of step is what the eye lands on.
+        /// </summary>
+        public IBrush LatestBrush
+        {
+            get { return Palette.Brush(_versions.LatestDiffers ? Palette.Accent : Palette.Text); }
+        }
+
+        /// <summary>Same rule for the installed column: only a deviation is coloured.</summary>
+        public IBrush InstalledBrush
+        {
+            get
+            {
+                var loud = _installed != null && _installed.Any && (!_installed.Intact || _versions.LocalDiffers);
+                return Palette.Brush(loud ? Palette.Warn : Palette.Text);
+            }
+        }
+
+        /// <summary>
+        /// Re-read what is on disk. Called after an install, and after the Mods tab changes something;
+        /// the network answers in this row have not changed, so neither has the latest release.
+        /// </summary>
+        public void SetInstalled(InstalledMod installed)
+        {
+            _installed = installed;
+            _versions = new ModVersions(Release.Source, Newest != null ? Newest.TagName : null,
+                                        installed != null ? installed.Version : null);
+            Raise("Installed");
+            Raise("LatestBrush");
+            Raise("InstalledBrush");
+        }
+
+        /// <summary>
+        /// The three versions in one sentence, and which of them is out of step.
+        /// </summary>
+        /// <remarks>
+        /// The columns are for scanning; this is for the row that has been chosen. It is the only place
+        /// that says a version out loud rather than making two cells be compared, and the only place
+        /// that can say what the button above it would do.
+        /// </remarks>
+        public string Describe()
+        {
+            var text = new StringBuilder(Name);
+            text.Append(": ");
+
+            text.Append(_versions.Listed != null ? "listed " + _versions.Listed : "no listed release");
+            text.Append(", newest " + (_versions.Latest ?? "unknown"));
+
+            if (_installed == null || !_installed.Any) text.Append(", not installed.");
+            else if (!_installed.Complete)
+            {
+                text.Append(", " + _installed.Present + " of " + _installed.Expected + " files installed.");
+            }
+            else if (string.IsNullOrEmpty(_installed.Version)) text.Append(", installed.");
+            else text.Append(", " + _installed.Version + " installed.");
+
+            if (_versions.LatestIsNewer)
+            {
+                text.Append(" Install latest takes " + _versions.Latest + ", which is not the reviewed release.");
+            }
+            else if (_versions.LatestDiffers)
+            {
+                text.Append(" The newest is not newer than the pin, so there is nothing to update to.");
+            }
+
+            if (_installed != null && _installed.Any && !_installed.Intact)
+            {
+                text.Append(" A file on disk is not the one the list recorded.");
+            }
+
+            if (_versions.LocalDiffers) text.Append(" What is installed is not the listed release.");
+            else if (_versions.LocalIsLatest && _versions.LatestDiffers)
+            {
+                text.Append(" What is installed is already the newest.");
+            }
+
+            if (_newestProblem != null) text.Append(" The newest could not be read: " + _newestProblem);
+
+            return text.ToString();
+        }
+
         public event PropertyChangedEventHandler PropertyChanged;
+
+        private void Raise(string property)
+        {
+            var handler = PropertyChanged;
+            if (handler != null) handler(this, new PropertyChangedEventArgs(property));
+        }
     }
 
     /// <summary>
@@ -117,19 +264,24 @@ namespace Switchboard.Views
         /// </summary>
         /// <remarks>
         /// Called after an install, and after the Mods tab changes something. The column is derived from
-        /// the filesystem, so re-reading it is a handful of File.Exists calls - and doing that instead of
-        /// re-running the whole lookup is the difference between the row updating immediately and the
-        /// user being told a mod they just installed is "not installed" until they switch tabs and back.
+        /// the filesystem, so re-reading it is a handful of File.Exists calls plus one Cecil pass over
+        /// each folder per refresh - and doing that instead of re-running the whole lookup is the
+        /// difference between the row updating immediately and the user being told a mod they just
+        /// installed is "not installed" until they switch tabs and back.
         ///
         /// Deliberately does not touch the status line or re-fetch releases: an install has just put a
         /// message there worth reading, and the tag numbers have not changed.
         /// </remarks>
         public void RefreshInstalled()
         {
+            var local = LocalFiles.Read(Host.Install);
+
             foreach (var row in _rows)
             {
-                row.Installed = DescribeInstalled(row.Release.Source);
+                row.SetInstalled(InstalledMod.Read(row.Release.Source, Host.Install, local));
             }
+
+            ShowDetail();
         }
 
         public void Reload()
@@ -137,6 +289,7 @@ namespace Switchboard.Views
             Summary.Text = "Not checked yet.";
             _rows.Clear();
             ShowEmpty("Not checked yet", "The catalogue is read from GitHub when this tab is opened.");
+            ShowDetail();
             UpdateButtons();
         }
 
@@ -155,6 +308,23 @@ namespace Switchboard.Views
                 return "Install a mod from the catalogue, or from a release URL. Installing puts code " +
                        "in your game folder that the game will load and run.";
             }
+        }
+
+        /// <summary>
+        /// The first few names from a list, and a count of the rest.
+        /// </summary>
+        /// <remarks>
+        /// The status line names every problem in full, so this does not have to: it names enough that a
+        /// person recognises their list and stops. The alternative is a report that is a paragraph long
+        /// for a catalogue of nine mods, which is how a status line stops being read.
+        /// </remarks>
+        private static string NameFew(List<string> names)
+        {
+            const int shown = 3;
+
+            if (names.Count <= shown) return string.Join(", ", names.ToArray());
+
+            return string.Join(", ", names.GetRange(0, shown).ToArray()) + " and " + (names.Count - shown) + " more";
         }
 
         /// <summary>Show the empty state in place of the table, with the given words.</summary>
@@ -255,11 +425,18 @@ namespace Switchboard.Views
             // state, because the path that found no loader returned before this ran - so the
             // Install button offered to install a mod that had nowhere to go.
             var canInstall = Host != null && Host.Install.HasBepInEx;
+            var row = Selected;
+            var latest = row != null && row.CanInstallLatest ? row.Newest.TagName : null;
 
             CheckButton.IsEnabled = !_busy && canInstall;
-            InstallButton.IsEnabled = !_busy && canInstall && List.SelectedItem is ReleaseRow;
+            InstallButton.IsEnabled = !_busy && canInstall && row != null;
             FromUrlButton.IsEnabled = !_busy && canInstall;
             UrlBox.IsEnabled = !_busy && canInstall;
+
+            // Named rather than only enabled: "Install latest" on its own asks a person to remember
+            // what the newest release is, and the whole point of the button is which version it takes.
+            InstallLatestButton.Content = latest != null ? "Install latest (" + latest + ")..." : "Install latest...";
+            InstallLatestButton.IsEnabled = !_busy && canInstall && latest != null;
         }
 
         private ReleaseRow Selected
@@ -269,11 +446,33 @@ namespace Switchboard.Views
 
         private void OnSelectionChanged(object sender, SelectionChangedEventArgs e)
         {
+            ShowDetail();
             UpdateButtons();
+        }
+
+        /// <summary>
+        /// Put the selected row's three versions under the list, or say nothing when there is no
+        /// selection. Cleared rather than left stale: a sentence about the previous row under a blank
+        /// table is worse than no sentence.
+        /// </summary>
+        private void ShowDetail()
+        {
+            var row = Selected;
+
+            if (row == null)
+            {
+                Detail.Text = "";
+                Detail.IsVisible = false;
+                return;
+            }
+
+            Detail.Text = row.Describe();
+            Detail.IsVisible = true;
         }
 
         private void OnCheck(object sender, Avalonia.Interactivity.RoutedEventArgs e) { CheckForUpdates(); }
         private void OnInstall(object sender, Avalonia.Interactivity.RoutedEventArgs e) { InstallSelected(); }
+        private void OnInstallLatest(object sender, Avalonia.Interactivity.RoutedEventArgs e) { InstallLatestSelected(); }
         private void OnFromUrl(object sender, Avalonia.Interactivity.RoutedEventArgs e) { InstallFromUrl(); }
 
         private void CheckForUpdates()
@@ -292,7 +491,7 @@ namespace Switchboard.Views
 
             Run(delegate
             {
-                var found = new List<ReleaseInfo>();
+                var found = new List<Checked>();
                 var problems = new List<string>();
 
                 // The live list first; the built-in one when it cannot be reached, with the reason kept
@@ -307,7 +506,33 @@ namespace Switchboard.Views
                 {
                     try
                     {
-                        found.Add(ModCatalogue.FetchLatest(source));
+                        var listed = ModCatalogue.FetchLatest(source);
+                        ReleaseInfo newest = listed;
+                        string unknown = null;
+
+                        // A pinned entry is the only one where the newest release can be a different
+                        // release from the one the list makes installable, so it is the only one worth
+                        // a second request - and the only one where the answer is still unknown when
+                        // that request fails. An unpinned entry already installs the newest release, so
+                        // the tag it just fetched is the answer.
+                        //
+                        // A failure here is a note on the row, not a missing row: the listed release is
+                        // still installable, and saying that is more use than dropping the mod because a
+                        // comparison could not be made.
+                        if (source.IsPinned)
+                        {
+                            newest = null;
+                            try
+                            {
+                                newest = ModCatalogue.FetchNewest(source);
+                            }
+                            catch (Exception ex)
+                            {
+                                unknown = ex.Message;
+                            }
+                        }
+
+                        found.Add(new Checked { Release = listed, Newest = newest, NewestProblem = unknown });
                     }
                     catch (Exception ex)
                     {
@@ -317,43 +542,96 @@ namespace Switchboard.Views
                     }
                 }
 
+                // Read once, off the UI thread: Cecil opens every dll in both folders, and doing that
+                // per row on the thread that draws the window is the difference between a list that
+                // appears and a window that stalls while it does.
+                var local = LocalFiles.Read(Host.Install);
+                var installed = new List<InstalledMod>(found.Count);
+                foreach (var entry in found)
+                {
+                    installed.Add(InstalledMod.Read(entry.Release.Source, Host.Install, local));
+                }
+
                 OnUi(delegate
                 {
                     _rows.Clear();
 
-                    foreach (var release in found)
+                    for (var i = 0; i < found.Count; i++)
                     {
-                        _rows.Add(new ReleaseRow(release, DescribeInstalled(release.Source)));
+                        _rows.Add(new ReleaseRow(found[i].Release, found[i].Newest, found[i].NewestProblem,
+                                                 installed[i]));
                     }
 
                     var reviewed = 0;
                     foreach (var release in found)
                     {
-                        if (release.Source.IsVerified) reviewed++;
+                        if (release.Release.Source.IsVerified) reviewed++;
                     }
 
                     var report = _rows.Count + " mod(s) checked against GitHub, from the " + listNote + ".";
 
                     // The count is worth saying out loud. "7 mods" and "7 mods, 6 of them reviewed"
-                    // are different offers, and the difference is the whole point of the pins.
-                    if (reviewed == _rows.Count)
+                    // are different offers, and the difference is the whole point of the pins. Said
+                    // only when there is something to count: "every one is pinned" about no mods at
+                    // all is the kind of sentence that makes a person stop believing the status line.
+                    if (_rows.Count > 0)
                     {
-                        report += " Every one is pinned to a reviewed release.";
-                    }
-                    else if (reviewed == 0)
-                    {
-                        report += " None of them are pinned to a reviewed release, so Install will say so for each.";
-                    }
-                    else
-                    {
-                        report += " " + reviewed + " of them are pinned to a reviewed release; the rest are " +
-                                  "listed without pins and Install will say so.";
+                        if (reviewed == _rows.Count)
+                        {
+                            report += " Every one is pinned to a reviewed release.";
+                        }
+                        else if (reviewed == 0)
+                        {
+                            report += " None of them are pinned to a reviewed release, so Install will say so for each.";
+                        }
+                        else
+                        {
+                            report += " " + reviewed + " of them are pinned to a reviewed release; the rest are " +
+                                      "listed without pins and Install will say so.";
+                        }
                     }
 
                     if (problems.Count > 0)
                     {
-                        report += " " + problems.Count + " could not be read. " +
-                                  string.Join("  ", problems.ToArray());
+                        report += " " + problems.Count + " could not be read. " + NameFew(problems);
+                    }
+
+                    // The deviations, counted and named. A person who does not scroll the list, or who
+                    // does not know that two tags side by side are the point, still gets told that
+                    // something in it is out of step and which entry it is.
+                    var behind = new List<string>();
+                    var unreadable = new List<string>();
+                    var notListed = new List<string>();
+
+                    foreach (var row in _rows)
+                    {
+                        if (row.CanInstallLatest)
+                        {
+                            behind.Add(row.Release.Source.DisplayName + " " + row.Newest.TagName + " (lists " +
+                                       row.Versions.Listed + ")");
+                        }
+
+                        if (row.NewestProblem != null) unreadable.Add(row.Release.Source.DisplayName);
+
+                        if (row.Versions.LocalDiffers) notListed.Add(row.Release.Source.DisplayName);
+                    }
+
+                    if (behind.Count > 0)
+                    {
+                        report += " " + behind.Count + " have a newer release than the list lists: " +
+                                  NameFew(behind) + ".";
+                    }
+
+                    if (notListed.Count > 0)
+                    {
+                        report += " " + notListed.Count + " have something installed that is not the listed " +
+                                  "release: " + NameFew(notListed) + ".";
+                    }
+
+                    if (unreadable.Count > 0)
+                    {
+                        report += " GitHub's newest release could not be read for " + unreadable.Count + ", so " +
+                                  "it is not compared: " + NameFew(unreadable) + ".";
                     }
 
                     // Passed to SetBusy rather than assigned separately, so the status line is told what
@@ -367,9 +645,11 @@ namespace Switchboard.Views
                     // to read it, so the empty state says which one this is.
                     if (_rows.Count == 0)
                     {
+                        // Named, not listed: ten unreachable repositories used to be ten paragraphs here,
+                        // which drew over the buttons below rather than being read.
                         ShowEmpty("No mods in the catalogue",
                             problems.Count > 0
-                                ? "The catalogue could not be read: " + string.Join("  ", problems.ToArray())
+                                ? "None of the " + problems.Count + " entries could be read: " + NameFew(problems)
                                 : "The catalogue is empty at the moment. Check again later.");
                     }
                     else
@@ -378,6 +658,7 @@ namespace Switchboard.Views
                     }
 
                     UpdateButtons();
+                    ShowDetail();
 
                     // A website request that arrived before the list did starts now that
                     // the rows exist. Inside the same UI turn, so no second refresh.
@@ -387,58 +668,19 @@ namespace Switchboard.Views
         }
 
         /// <summary>
-        /// Whether a mod's file is present, current, and still the file the catalogue reviewed.
+        /// One entry as the refresh found it: what the list installs, what GitHub has, and why that
+        /// second answer is missing when it is.
         /// </summary>
         /// <remarks>
-        /// Pinned plugin files are hashed and compared, so an install that was overwritten after
-        /// the fact is not described as installed. The shared library is skipped: several entries
-        /// ship their own copy, so whichever was installed last is the one on disk.
+        /// A flat record rather than three parallel lists, because the three answers are built on the
+        /// download thread and read on the UI thread in the same order - and a slip in that order would
+        /// put one mod's newest release in another mod's row.
         /// </remarks>
-        private string DescribeInstalled(ModSource source)
+        private sealed class Checked
         {
-            var present = 0;
-            var checkedFiles = 0;
-            var matching = 0;
-
-            foreach (var file in source.Files)
-            {
-                var path = Path.Combine(ModCatalogue.FolderFor(Host.Install, file.Folder), file.FileName);
-                if (!File.Exists(path)) continue;
-
-                present++;
-
-                // Only a mod's own code, and only what the catalogue can be compared against.
-                if (!file.IsPinned || file.Folder != ModFolder.Plugins) continue;
-
-                checkedFiles++;
-                try
-                {
-                    if (string.Equals(ModInstaller.Sha256Of(path), file.Sha256, StringComparison.OrdinalIgnoreCase))
-                    {
-                        matching++;
-                    }
-                }
-                catch (Exception)
-                {
-                    // A file that cannot be read is not a file that matches.
-                }
-            }
-
-            if (present == 0) return "not installed";
-
-            if (present == source.Files.Length)
-            {
-                // Pinned, and something on disk is not the reviewed file: say so rather than
-                // calling it installed. A file replaced after the install is the case this is for.
-                if (checkedFiles > 0 && matching < checkedFiles)
-                {
-                    return "installed (differs)";
-                }
-
-                return "installed";
-            }
-
-            return "partly (" + present + "/" + source.Files.Length + ")";
+            public ReleaseInfo Release;
+            public ReleaseInfo Newest;
+            public string NewestProblem;
         }
 
         private void InstallSelected()
@@ -446,8 +688,35 @@ namespace Switchboard.Views
             var row = Selected;
             if (row == null) return;
 
-            var release = row.Release;
+            Install(row.Release, false);
+        }
 
+        /// <summary>
+        /// Install GitHub's newest release instead of the one the list pins.
+        /// </summary>
+        /// <remarks>
+        /// The row already holds that release, because the refresh fetched it to compare the tags, so
+        /// this asks GitHub for nothing new. What it does ask for is a different install: the
+        /// catalogue's hashes describe the listed release and cannot check this one, so the plan is
+        /// built in the mode that says so out loud rather than the one that quietly skips the checks.
+        /// </remarks>
+        private void InstallLatestSelected()
+        {
+            var row = Selected;
+            if (row == null || !row.CanInstallLatest) return;
+
+            Install(row.Newest, true);
+        }
+
+        /// <summary>
+        /// Fetch one release, plan it, and confirm it. The only install path either button uses.
+        /// </summary>
+        /// <param name="latestInstead">
+        /// True for the newest release chosen over the listed one - the plan then carries the listed
+        /// version so its confirmation can say the hashes did not apply.
+        /// </param>
+        private void Install(ReleaseInfo release, bool latestInstead)
+        {
             string running;
             if (ModManager.GameRunning(out running))
             {
@@ -458,7 +727,13 @@ namespace Switchboard.Views
             }
 
             var token = NewToken();
-            SetBusy(true, "Preparing " + release.Source.DisplayName + "...");
+
+            // A download is a download, but this one is not the release the list offered, and the
+            // status line is where that first becomes visible rather than only in the confirmation.
+            SetBusy(true, latestInstead
+                ? "Preparing " + release.Source.DisplayName + " " + release.TagName +
+                  ", which is not the listed release..."
+                : "Preparing " + release.Source.DisplayName + "...");
 
             Run(delegate
             {
@@ -468,7 +743,7 @@ namespace Switchboard.Views
                     var fetched = ModInstaller.Fetch(release.Package, token, note => Status(note));
                     folder = fetched.WorkingFolder;
 
-                    var plan = ModInstaller.Plan(release, fetched.UnpackedFolder, Host.Install);
+                    var plan = ModInstaller.Plan(release, fetched.UnpackedFolder, Host.Install, latestInstead);
                     var work = folder;
 
                     OnUi(delegate
@@ -526,9 +801,8 @@ namespace Switchboard.Views
                     }
 
                     var second = await Dialogs.ConfirmAsync("Replace existing files?",
-                        "This replaces " + string.Join(", ", replaced.ToArray()) + "." + Environment.NewLine +
-                        Environment.NewLine +
-                        "There is no undo and no backup. A replaced file cannot be recovered from here.",
+                        "This replaces " + string.Join(", ", replaced.ToArray()) + ". " +
+                        "There is no undo.",
                         "Replace", DialogSeverity.Warning);
 
                     if (!second)
@@ -883,10 +1157,9 @@ namespace Switchboard.Views
             {
                 var text = new StringBuilder();
 
-                text.AppendLine("Install from " + host + "?");
-                text.AppendLine();
-                text.AppendLine("There is no list behind this URL. It is whatever that address serves, and it");
-                text.AppendLine("will be loaded and run by the game on the next launch.");
+                // Short, like the catalogue's: the host and the files are the facts, and the rest of the
+                // box is the warning that there is nothing behind this URL but the URL.
+                text.AppendLine("There is no list behind this URL - the game will load and run whatever it serves.");
                 text.AppendLine();
 
                 foreach (var step in plan.Steps)
@@ -910,8 +1183,7 @@ namespace Switchboard.Views
                 if (looksInert)
                 {
                     text.AppendLine();
-                    text.AppendLine("This file has no [BepInPlugin] attribute, so BepInEx will not load it as a");
-                    text.AppendLine("mod. It is a library - harmless, and it will do nothing on its own.");
+                    text.AppendLine("No [BepInPlugin]: this is a library. Harmless, and it does nothing on its own.");
                 }
 
                 if (!await Dialogs.ConfirmAsync("Install from " + host + "?", text.ToString(), "Install",

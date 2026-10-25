@@ -290,7 +290,7 @@ is.
 ### Testing
 
 ```bash
-./tools/test-getmods.sh            # 184 assertions, offline
+./tools/test-getmods.sh            # 270 assertions, offline
 ./tools/test-getmods.sh --online   # plus a live check per known mod, against the real GitHub API
 ```
 
@@ -307,7 +307,10 @@ logic.
 
 What is under test is the logic and the file operations: zip-slip refused in both the `/` and `\` forms, a
 checksum mismatch caught, a real download unpacked and planned, catalogue validation, HTTPS-only downloads
-with redirects checked by hand, config parse/validate/round-trip, and the switchboard-update comparison.
+with redirects checked by hand, config parse/validate/round-trip, the switchboard-update comparison, and
+the three-version comparison the list shows — including that a version stamped into a dll and the tag it
+was released under count as the same release, and that an off-pin install plan carries the version it
+departs from.
 
 Not covered by tests, and honestly so: **the UI**. It is presentation, and these tests are about what
 happens to files on disk. What that leaves is checked by running it: Avalonia resolves styles, control
@@ -405,6 +408,7 @@ src/
 |-- Http.cs            The only code that touches the network: https only, redirects checked by hand
 |-- ModCatalogue.cs    The mod list, live from ModCatalogue with a built-in fallback, and what GitHub says each latest release is
 |-- ModInstaller.cs    Download, unpack, verify, and only then install
+|-- ModVersions.cs     The three versions of a mod - pinned, newest, installed - and which of them differ
 |-- UpdateChecker.cs   Is a newer switchboard released? - the tag comparison behind the update bar
 |-- SelfUpdate.cs     Replacing this program with a newer one: the download, the checksum, the script
 |-- ScriptRunner.cs    Running a mod's optional post-install script, and collecting what it prints
@@ -496,12 +500,10 @@ file against the hash the catalogue recorded, reads each file's metadata, and sh
 be written:
 
 ```text
-AI Backend  v1.2.1
+AI Backend  v1.2.1   (ScamWYF.AiBackend-v1.2.1.zip, 79.9 KB)
+swyf-modding/AI-Backend on GitHub.
 
-From swyf-modding/AI-Backend on GitHub.
-
-Reviewed: every file below matches the hash the mod list recorded for it when
-it was listed, and the install will refuse anything that does not.
+Reviewed: every file matches the hash the list recorded for it.
 
   Scam WYF AI Backend  1.2.1
     -> BepInEx\plugins\ScamWYF.AiBackend.dll
@@ -509,12 +511,12 @@ it was listed, and the install will refuse anything that does not.
   ScamWYF.Modding.Core.dll  1.3.0+g5022e10
     -> BepInEx\core\ScamWYF.Modding.Core.dll
     can load code at runtime, can read files, can write files
-
-Files come from ScamWYF.AiBackend-v1.2.1.zip on GitHub, 79.9 KB.
-
-GitHub's digest of the download: 4d1c...
-  (that is what the author uploaded, not a record of a review.)
 ```
+
+An install that is *not* the reviewed release says so in one line instead — `Not reviewed: v1.4.0 is newer
+than the v1.2.1 the list reviewed, so no hash applies.` — and carries GitHub's digest of the zip at the
+bottom, because that is then the only number in the box. A reviewed install leaves it out: the per-file
+hashes say more, and the review is what the dialog is about.
 
 The version shown is read **out of each file**, not taken from the URL — that is the version that will
 actually load. Replacing something already installed gets a second confirmation, and there is no undo.
@@ -535,6 +537,28 @@ the same in a sentence before anything is written. A mismatch is not a warning: 
 
 This is what makes a catalogue entry a record of a review rather than a pointer to a repository. It is
 also why the tab can say a mod is reviewed at all: the claim is checkable, and the check is the hash.
+
+**Three versions, and which of them differ.** A pin can be older than the author's newest release, and
+the disk can be older than either, so the list shows all three rather than one number that means "the
+release the list names":
+
+| Column | What it is | How a deviation shows |
+|---|---|---|
+| Release | The release *Install* installs — the pin, or the newest when the entry does not pin one | — |
+| Latest | GitHub's `/releases/latest` for that repository | `v1.4.0 (newer)` or `(differs)`, in the accent colour; `unknown` when the lookup failed |
+| Installed | The version inside the plugin file in your game folder | `1.0.4 (not listed)` when it is not the pinned release, `1.0.4 (differs)` when the bytes are not the ones the list recorded |
+
+The comparison is by version, not by string: the tag is `v1.2.1` and the version stamped into the dll is
+`1.2.1+g5022e10`, and those are the same release. Selecting a row states all three in a sentence under
+the list, which is also where the deviation is named rather than left as two cells to compare.
+
+*Install latest* is only enabled when the newest release really is newer than the pin, and its label
+carries the version it would install. It is a different offer, not a shortcut: the catalogue's hashes
+describe the pinned release, so nothing about the newest one can be checked against them. That selection
+still has to be a release the entry's files exist in — the download, the file names, the `[BepInPlugin]`
+checks and the confirmation are the same — but the confirmation says `Not reviewed` and names the release
+the list reviewed, and the capabilities the catalogue recorded are left out, because they describe bytes
+that are not these. The pin is not updated by this; it stays what the next *Install* takes.
 
 **Optional setup steps.** Some mods need something the download cannot do by itself — a stream mod's
 ChatBridge, which talks to Twitch and is configured per machine. A catalogue entry can name up to four
@@ -560,7 +584,7 @@ dll placed by whether it carries a `[BepInPlugin]`: with one goes to `plugins`, 
 | A file that is not a .NET assembly | Checked with Cecil, the same reader the Mods tab uses |
 | A mod with no `[BepInPlugin]` | BepInEx would not load it. The shared library is the exception, and it routes to `core` precisely so that is not a problem |
 | A download that fails its checksum | Discarded, and nothing is installed |
-| A release that is not the one the catalogue pins | The pinned release is what was reviewed. Installing a different one under the same entry would defeat the pin |
+| A release that is not the one the catalogue pins | The pinned release is what was reviewed. Installing a different one under the same entry would defeat the pin — the only way past it is *Install latest*, which says on the dialog that nothing was reviewed |
 | A file whose SHA-256 is not the one the catalogue recorded | The bytes are not the ones a person approved. Nothing is installed |
 | A setup script whose SHA-256 is not the one recorded | A script is the loudest part of an install, so it gets the same check as a dll |
 | A live catalogue that pins a release but gives a file no hash | An entry that says "reviewed" and does not say what was reviewed is not treated as reviewed |
@@ -586,8 +610,10 @@ malicious: a reviewed entry is one somebody looked at, which is a weaker and mor
 
 ### Rate limits
 
-The GitHub API allows 60 unauthenticated requests an hour per address, and one lookup per known mod.
-Hitting it says so, rather than reporting a generic failure.
+The GitHub API allows 60 unauthenticated requests an hour per address. A check spends one lookup per
+known mod, and one more for each pinned entry, because the newest release is a second question from the
+pinned one; an entry whose newest release cannot be read keeps its row and says so instead of vanishing.
+Hitting the limit says so, rather than reporting a generic failure.
 
 ---
 

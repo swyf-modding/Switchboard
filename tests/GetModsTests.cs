@@ -28,6 +28,8 @@ namespace Switchboard.Tests
             ChecksumMismatchIsCaught();
             PinnedEntries();
             PinnedBytesAreChecked();
+            LatestInstallPlan();
+            InstalledVersionReads();
             ZipSlipIsRefused();
             ZipWithTraversalIsRefused();
             NormalZipUnpacks();
@@ -40,6 +42,7 @@ namespace Switchboard.Tests
             PostInstallRules();
             BepInExVersionRules();
             SwitchboardUpdateRules();
+            VersionDeviations();
             InstallRequestRules();
             ModConfigFiles();
 
@@ -320,6 +323,168 @@ namespace Switchboard.Tests
             {
                 ModInstaller.Discard(folder);
             }
+        }
+
+        // ---------------------------------------------------------------- newest release over a pin
+
+        /// <summary>
+        /// Installing GitHub's newest release when it is not the one the list pins.
+        /// </summary>
+        /// <remarks>
+        /// The pin exists so that a different release cannot be installed under the same entry by
+        /// accident. This is the path that leaves it on purpose, so two things have to stay true: the
+        /// ordinary install path still refuses that release, and the one that accepts it says in words
+        /// that nothing was checked - including the capabilities, which describe the listed release.
+        /// </remarks>
+        private static void LatestInstallPlan()
+        {
+            Section("Newest release over a pin");
+
+            var folder = Temp("latest");
+            try
+            {
+                File.Copy(typeof(GetModsTests).Assembly.Location, Path.Combine(folder, "Thing.dll"), true);
+                File.WriteAllText(Path.Combine(folder, "setup.ps1"), "Write-Host hello");
+
+                var install = GameInstall.Resolve(Path.Combine(folder, "game"));
+                var asset = new ReleaseAsset("Thing.zip", 1024, "https://github.com/x/y/Thing.zip", null);
+                var actual = ModInstaller.Sha256Of(Path.Combine(folder, "Thing.dll"));
+
+                // Pinned to v1.0.0, with hashes recorded for that release's bytes.
+                // The test assembly carries no [BepInPlugin], so the file is declared as one that does
+                // not need it: this test is about the pin, not about the attribute check.
+                var source = new ModSource("Thing", "Thing", "A thing.",
+                    new[] { new ModFile("Thing.dll", ModFolder.Plugins, false, actual, new[] { "network" }) },
+                    ModCatalogue.DefaultOwner,
+                    new[] { new PostInstallStep("setup.ps1", "Does it.",
+                                                ModInstaller.Sha256Of(Path.Combine(folder, "setup.ps1"))) },
+                    "v1.0.0");
+
+                var newest = new ReleaseInfo(source, "v1.4.0", "https://github.com/x/y", asset);
+
+                // The pin still does its job on the path that is not asked for the newest release.
+                Throws("a pinned entry still refuses a release that is not the listed one",
+                    () => ModInstaller.Plan(newest, folder, install));
+
+                var plan = ModInstaller.Plan(newest, folder, install, true);
+                Check("the newest release plans when it is asked for by name", plan.Release.TagName, "v1.4.0");
+                Check("the plan says which listing it departs from", plan.ListedVersion, "v1.0.0");
+                Check("the files the entry names are still the ones installed", plan.Steps.Count, 1);
+
+                // The script was recorded for the listed release, so it cannot be called pinned here.
+                Check("a setup step of the newest release is not called pinned", plan.Scripts[0].IsPinned, false);
+
+                var text = ModInstaller.Describe(plan);
+                Check("the confirmation says it is not reviewed", text.Contains("Not reviewed"), true);
+                Check("...and names both releases",
+                    text.Contains("v1.4.0") && text.Contains("v1.0.0"), true);
+
+                // The listed release's own confirmation is the comparison: it must show the recorded
+                // capabilities, and the newest release must not show them against bytes nobody scanned.
+                var listed = new ReleaseInfo(source, "v1.0.0", "https://github.com/x/y", asset);
+                Check("the listed release's confirmation shows the recorded capabilities",
+                    ModInstaller.Describe(ModInstaller.Plan(listed, folder, install))
+                        .Contains("can use the network"), true);
+                Check("the newest release's confirmation does not", text.Contains("can use the network"), false);
+
+                // Nothing to deviate from on an unpinned entry: Install already takes the newest.
+                var unpinned = new ModSource("Thing", "Thing", "A thing.",
+                    new[] { new ModFile("Thing.dll", ModFolder.Plugins, false) });
+                Throws("an unpinned entry is not offered a second install path",
+                    () => ModInstaller.Plan(new ReleaseInfo(unpinned, "v1.4.0", "https://github.com/x/y", asset),
+                                            folder, install, true));
+            }
+            finally
+            {
+                ModInstaller.Discard(folder);
+            }
+        }
+
+        // ---------------------------------------------------------------- what is installed
+
+        /// <summary>
+        /// The installed column and the version in it, read from the files on disk.
+        /// </summary>
+        /// <remarks>
+        /// The list compares three versions, and the one nobody can look up is the one inside the dll
+        /// that is actually in the game folder. It has to come from the plugin file rather than the
+        /// shared library, or every entry would report the library's version as its own.
+        /// </remarks>
+        private static void InstalledVersionReads()
+        {
+            Section("What is installed");
+
+            var folder = Temp("installed");
+            try
+            {
+                var game = Path.Combine(folder, "game");
+                var plugins = Path.Combine(game, "BepInEx", "plugins");
+                var core = Path.Combine(game, "BepInEx", "core");
+                Directory.CreateDirectory(plugins);
+                Directory.CreateDirectory(core);
+
+                var install = GameInstall.Resolve(game);
+
+                var pluginPath = Path.Combine(plugins, "Thing.dll");
+                File.Copy(typeof(GetModsTests).Assembly.Location, pluginPath, true);
+
+                // A different assembly for the library, so the two versions cannot be confused.
+                var libraryPath = Path.Combine(core, "Library.dll");
+                File.Copy(typeof(object).Assembly.Location, libraryPath, true);
+
+                var source = new ModSource("Thing", "Thing", "A thing.", new[]
+                {
+                    new ModFile("Thing.dll", ModFolder.Plugins, true, ModInstaller.Sha256Of(pluginPath)),
+                    new ModFile("Library.dll", ModFolder.Core, false)
+                });
+
+                var local = LocalFiles.Read(install);
+                var installed = InstalledMod.Read(source, install, local);
+
+                Check("both files are found", installed.Present, 2);
+                Check("the entry is complete", installed.Complete, true);
+                Check("the plugin still matches the recorded bytes", installed.Intact, true);
+                Check("the version comes from the plugin, not the library",
+                    installed.Version, ScanVersion(plugins, "Thing.dll"));
+                Check("...which is a different version from the library's",
+                    installed.Version == ScanVersion(core, "Library.dll"), false);
+
+                // The shared library's own entry carries no plugin, so the library is the only source.
+                var libraryOnly = new ModSource("mod-lib", "Shared Library", "The library.", new[]
+                {
+                    new ModFile("Library.dll", ModFolder.Core, false)
+                });
+                Check("a library-only entry reports the library's version",
+                    InstalledMod.Read(libraryOnly, install, local).Version, ScanVersion(core, "Library.dll"));
+
+                var missing = new ModSource("Gone", "Gone", "Nothing.", new[]
+                {
+                    new ModFile("Gone.dll", ModFolder.Plugins, true)
+                });
+                var gone = InstalledMod.Read(missing, install, local);
+                Check("a mod that is not there is not installed", gone.Any, false);
+                Check("...and has no version", gone.Version, null);
+
+                // A file replaced after the install: present, and not the bytes the list recorded.
+                var replaced = new ModSource("Thing", "Thing", "A thing.", new[]
+                {
+                    new ModFile("Thing.dll", ModFolder.Plugins, true, new string('b', 64))
+                });
+                var changed = InstalledMod.Read(replaced, install, local);
+                Check("a replaced file is still found", changed.Present, 1);
+                Check("...and is not the recorded file", changed.Intact, false);
+            }
+            finally
+            {
+                ModInstaller.Discard(folder);
+            }
+        }
+
+        /// <summary>The version the Mods tab would show for a file, as the comparison's ground truth.</summary>
+        private static string ScanVersion(string folder, string fileName)
+        {
+            var entry = PluginScanner.Scan(folder, null).FirstOrDefaultNamed(fileName);
+            return entry != null ? entry.DisplayVersion : null;
         }
 
         // ---------------------------------------------------------------- archive handling
@@ -1076,6 +1241,62 @@ namespace Switchboard.Tests
         {
             Check("'" + current + "' is not told about '" + latest + "'",
                 UpdateChecker.IsUpdateAvailable(current, latest), false);
+        }
+
+        // ---------------------------------------------------------------- three versions
+
+        /// <summary>
+        /// The comparison behind the Latest column, the Installed column and the sentence under them.
+        /// </summary>
+        /// <remarks>
+        /// A tag is "v1.2.1" and the version stamped into the dll is "1.2.1+g5022e10". Comparing those
+        /// as text would mark every row as a deviation, which is worse than marking none: the column
+        /// would carry no information and the Install latest button would be offered for a mod that is
+        /// already current. These are the cases where the answer has to be the version's, not the
+        /// string's.
+        /// </remarks>
+        private static void VersionDeviations()
+        {
+            Section("Version comparison");
+
+            Check("a tag and the version stamped into a dll are the same release",
+                VersionTag.Same("v1.2.1", "1.2.1+g5022e10"), true);
+            Check("build metadata is not a version", VersionTag.Same("1.2.1", "1.2.1+3.g0a1b2c3.dirty"), true);
+            Check("a trailing .0 is the same release", VersionTag.Same("v1.2.1", "1.2.1.0"), true);
+            Check("a different number is a different release", VersionTag.Same("v1.2.1", "1.2.2"), false);
+            Check("a prerelease is not the release", VersionTag.Same("v1.2.0", "1.2.0-rc1"), false);
+            Check("nothing is not a version", VersionTag.Same(null, "v1.2.1"), false);
+            Check("two unreadable strings are only equal as text", VersionTag.Same("nightly", "latest"), false);
+
+            var pinned = new ModSource("Thing", "Thing", "A thing.",
+                new[] { new ModFile("Thing.dll", ModFolder.Plugins, true) },
+                ModCatalogue.DefaultOwner, null, "v1.2.1");
+
+            // The case the button exists for: the list is behind the author, and what is installed is
+            // the listed release, so there is one thing to do and it is offered.
+            var behind = new ModVersions(pinned, "v1.4.0", "1.2.1+g0a1b2c3");
+            Check("a newer release than the pin is a deviation", behind.LatestDiffers, true);
+            Check("...and the latest install is offered for it", behind.LatestIsNewer, true);
+            Check("an install of the pin is not a local deviation", behind.LocalDiffers, false);
+
+            var current = new ModVersions(pinned, "v1.2.1", "1.2.1");
+            Check("the pin being the newest release is not a deviation", current.LatestDiffers, false);
+            Check("...and offers nothing", current.LatestIsNewer, false);
+
+            // A pin that is not the newest release, but is not behind it either.
+            var older = new ModVersions(pinned, "v1.1.0", null);
+            Check("a newest release older than the pin is still a deviation", older.LatestDiffers, true);
+            Check("...but there is nothing to install", older.LatestIsNewer, false);
+
+            var ahead = new ModVersions(pinned, "v1.4.0", "1.4.0");
+            Check("an install ahead of the pin is a local deviation", ahead.LocalDiffers, true);
+            Check("...and is the newest release", ahead.LocalIsLatest, true);
+
+            var unpinned = new ModSource("Thing", "Thing", "A thing.",
+                new[] { new ModFile("Thing.dll", ModFolder.Plugins, true) });
+            var plain = new ModVersions(unpinned, "v1.4.0", null);
+            Check("an unpinned entry has nothing to deviate from", plain.LatestDiffers, false);
+            Check("...and offers no second install path", plain.LatestIsNewer, false);
         }
 
         // ---------------------------------------------------------------- install requests

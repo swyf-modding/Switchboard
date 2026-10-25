@@ -16,7 +16,8 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
+            <RowDefinition Height="*" MinHeight="120" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
@@ -25,7 +26,14 @@
         <!-- What this tab is for, in one line, under the tab strip. -->
         <TextBlock x:Name="PurposeText" Grid.Row="0" Classes="purpose" Margin="0,0,0,10" />
 
-        <TextBlock x:Name="Summary" Grid.Row="1" Classes="status" />
+        <!--
+            Bounded on purpose. The report below it names what could not be read and which entries are
+            out of step, and an unbounded wrapping line would grow until the table it is describing had
+            no height left - which is how a long failure list turns the list into an empty box. Three
+            lines and an ellipsis; the status bar at the bottom of the window has the whole sentence.
+        -->
+        <TextBlock x:Name="Summary" Grid.Row="1" Classes="status" MaxLines="3"
+                   TextTrimming="CharacterEllipsis" />
 
         <Grid Grid.Row="2" Margin="0,0,0,12">
             <Grid.RowDefinitions>
@@ -37,17 +45,19 @@
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="150" />
                     <ColumnDefinition Width="90" />
+                    <ColumnDefinition Width="124" />
                     <ColumnDefinition Width="80" />
-                    <ColumnDefinition Width="70" />
-                    <ColumnDefinition Width="110" />
+                    <ColumnDefinition Width="64" />
+                    <ColumnDefinition Width="144" />
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
                 <TextBlock Grid.Column="0" Text="Mod" Classes="columnHeader" />
                 <TextBlock Grid.Column="1" Text="Release" Classes="columnHeader" />
-                <TextBlock Grid.Column="2" Text="Reviewed" Classes="columnHeader" />
-                <TextBlock Grid.Column="3" Text="Size" Classes="columnHeader" />
-                <TextBlock Grid.Column="4" Text="Installed" Classes="columnHeader" />
-                <TextBlock Grid.Column="5" Text="What it does" Classes="columnHeader" />
+                <TextBlock Grid.Column="2" Text="Latest" Classes="columnHeader" />
+                <TextBlock Grid.Column="3" Text="Reviewed" Classes="columnHeader" />
+                <TextBlock Grid.Column="4" Text="Size" Classes="columnHeader" />
+                <TextBlock Grid.Column="5" Text="Installed" Classes="columnHeader" />
+                <TextBlock Grid.Column="6" Text="What it does" Classes="columnHeader" />
             </Grid>
 
             <Border Grid.Row="0" Classes="rule" VerticalAlignment="Bottom" />
@@ -60,17 +70,21 @@
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="150" />
                                     <ColumnDefinition Width="90" />
+                                    <ColumnDefinition Width="124" />
                                     <ColumnDefinition Width="80" />
-                                    <ColumnDefinition Width="70" />
-                                    <ColumnDefinition Width="110" />
+                                    <ColumnDefinition Width="64" />
+                                    <ColumnDefinition Width="144" />
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Grid.Column="0" Text="{Binding Name}" Classes="cell" />
                                 <TextBlock Grid.Column="1" Text="{Binding Tag}" Classes="cell" />
-                                <TextBlock Grid.Column="2" Text="{Binding Reviewed}" Classes="cell" />
-                                <TextBlock Grid.Column="3" Text="{Binding Size}" Classes="cell" />
-                                <TextBlock Grid.Column="4" Text="{Binding Installed}" Classes="cell" />
-                                <TextBlock Grid.Column="5" Text="{Binding What}" Classes="cell" />
+                                <TextBlock Grid.Column="2" Text="{Binding Latest}" Classes="cell"
+                                           Foreground="{Binding LatestBrush}" />
+                                <TextBlock Grid.Column="3" Text="{Binding Reviewed}" Classes="cell" />
+                                <TextBlock Grid.Column="4" Text="{Binding Size}" Classes="cell" />
+                                <TextBlock Grid.Column="5" Text="{Binding Installed}" Classes="cell"
+                                           Foreground="{Binding InstalledBrush}" />
+                                <TextBlock Grid.Column="6" Text="{Binding What}" Classes="cell" />
                             </Grid>
                         </Border>
                     </DataTemplate>
@@ -84,7 +98,13 @@
             <Border x:Name="Empty" Grid.Row="1" Classes="empty" IsVisible="False">
                 <StackPanel VerticalAlignment="Center">
                     <TextBlock x:Name="EmptyTitle" Classes="emptyTitle" />
-                    <TextBlock x:Name="EmptyHint" Classes="emptyHint" />
+                    <!--
+                        Bounded for the same reason the summary is: this one carries the reason the list
+                        could not be read, which is one sentence per repository when GitHub refuses the
+                        requests - and an unbounded hint draws straight over the buttons below it.
+                    -->
+                    <TextBlock x:Name="EmptyHint" Classes="emptyHint" MaxLines="3"
+                               TextTrimming="CharacterEllipsis" />
                 </StackPanel>
             </Border>
         </Grid>
@@ -93,16 +113,31 @@
             "Refresh from GitHub" rather than "Check for updates": the status bar has a button with
             almost the same words, and that one is about Switchboard itself rather than about the
             mods in the list. Two buttons called "Check for updates" in one window is one too many.
+
+            "Install latest" is separate from "Install" because it is a different offer: Install takes
+            the release the list reviewed, and this one takes the author's newest, which nobody has
+            looked at. It is only ever enabled when those are two different releases, and its label
+            names the version it would install so the difference is visible before it is pressed.
         -->
         <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,0,0,12">
             <Button x:Name="CheckButton" Content="Refresh from GitHub" MinWidth="150"
                     Theme="{StaticResource FlatButton}" Click="OnCheck" />
             <Button x:Name="InstallButton" Content="Install..." Margin="8,0,0,0" MinWidth="130"
                     Theme="{StaticResource AccentButton}" Click="OnInstall" />
+            <Button x:Name="InstallLatestButton" Content="Install latest..." Margin="8,0,0,0" MinWidth="150"
+                    Theme="{StaticResource FlatButton}" Click="OnInstallLatest" />
         </StackPanel>
 
+        <!--
+            The selected row's three versions in a sentence: what the list lists, what GitHub has, what
+            is on disk. The columns show them side by side; this says which of them is out of step and
+            what installing the newest release would mean, because a colour and a suffix cannot.
+        -->
+        <TextBlock x:Name="Detail" Grid.Row="4" Classes="note" Margin="0,0,0,12" IsVisible="False"
+                   MaxLines="3" TextTrimming="CharacterEllipsis" />
+
         <!-- The textbox takes the room the row has, rather than a fixed width that does not fit a URL. -->
-        <Grid Grid.Row="4" Margin="0,0,0,12">
+        <Grid Grid.Row="5" Margin="0,0,0,12">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
@@ -118,7 +153,7 @@
                     Theme="{StaticResource FlatButton}" Click="OnFromUrl" />
         </Grid>
 
-        <TextBlock Grid.Row="5" Classes="note" Foreground="{StaticResource WarnBrush}"
-                   Text="Installing a mod puts code in your game folder that BepInEx will load and run on the next launch. Only install what you trust.&#10;&#10;A mod marked reviewed installs the release the catalogue lists, not the newest one the author has published, and each file is checked against the SHA-256 recorded when it was listed. A file that does not match is refused. That proves the bytes are the ones somebody approved; it is not a signature, and it cannot tell you whether a mod is safe to run.&#10;&#10;Changes take effect on the next launch." />
+        <TextBlock Grid.Row="6" Classes="note" Foreground="{StaticResource WarnBrush}"
+                   Text="Installing puts code in your game folder that the game will load and run. Only install what you trust.&#10;&#10;A reviewed mod installs the release the list names, with every file checked against its recorded SHA-256, and refuses anything that does not match. Install latest takes the author's newest release instead, which nothing has checked.&#10;&#10;Changes take effect on the next launch." />
     </Grid>
 </UserControl>

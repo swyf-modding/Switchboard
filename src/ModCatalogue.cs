@@ -734,11 +734,41 @@ namespace Switchboard
         /// </summary>
         public static ReleaseInfo FetchLatest(ModSource source)
         {
-            var url = source.IsPinned
-                ? "https://api.github.com/repos/" + source.Owner + "/" + source.Repo + "/releases/tags/" +
-                  Uri.EscapeDataString(source.ApprovedVersion)
-                : "https://api.github.com/repos/" + source.Owner + "/" + source.Repo + "/releases/latest";
+            if (!source.IsPinned) return FetchNewest(source);
 
+            return FetchTag(source, source.ApprovedVersion);
+        }
+
+        /// <summary>
+        /// GitHub's newest published release of one mod, whatever the catalogue lists.
+        /// </summary>
+        /// <remarks>
+        /// The other half of the comparison the Get mods tab shows. An entry may pin a release older
+        /// than the author's newest, and a person is entitled to see that - and to install it on
+        /// purpose - without the pin pretending the newer release does not exist. Nothing installs
+        /// this by itself: <see cref="FetchLatest"/> still decides what the list offers, so an entry
+        /// that pins a release can only leave it by an explicit choice.
+        /// </remarks>
+        public static ReleaseInfo FetchNewest(ModSource source)
+        {
+            return FetchRelease(source,
+                "https://api.github.com/repos/" + source.Owner + "/" + source.Repo + "/releases/latest", null);
+        }
+
+        /// <summary>One named release of one mod.</summary>
+        public static ReleaseInfo FetchTag(ModSource source, string tag)
+        {
+            return FetchRelease(source,
+                "https://api.github.com/repos/" + source.Owner + "/" + source.Repo + "/releases/tags/" +
+                Uri.EscapeDataString(tag), tag);
+        }
+
+        /// <summary>
+        /// One release, read out of GitHub's reply and checked against the tag that was asked for.
+        /// </summary>
+        /// <param name="expectedTag">The tag the URL asked for, or null when it asked for the newest.</param>
+        private static ReleaseInfo FetchRelease(ModSource source, string url, string expectedTag)
+        {
             string json;
             try
             {
@@ -746,9 +776,12 @@ namespace Switchboard
             }
             catch (IOException ex)
             {
-                if (!source.IsPinned) throw;
+                // Only a named release gets the explanation. Asking for the newest and getting nothing
+                // is the repository having no releases at all, and Http's own sentence says so better
+                // than a paragraph about a pin the caller did not ask about.
+                if (expectedTag == null) throw;
 
-                throw new IOException("the mod list lists " + source.ApprovedVersion + " of " + source.Repo +
+                throw new IOException("the mod list lists " + expectedTag + " of " + source.Repo +
                                       ", and GitHub does not have that release any more. Nothing was installed. " +
                                       ex.Message, ex);
             }
@@ -775,11 +808,11 @@ namespace Switchboard
                 var tag = GitHubJson.Text(root, "tag_name");
                 var page = GitHubJson.Text(root, "html_url");
 
-                // Defence in depth: the URL asked for the pinned tag, and this checks that the
-                // reply really is that release rather than something the API decided to return.
-                if (source.IsPinned && !string.Equals(tag, source.ApprovedVersion, StringComparison.Ordinal))
+                // Defence in depth: the URL asked for that tag, and this checks that the reply really
+                // is that release rather than something the API decided to return.
+                if (expectedTag != null && !string.Equals(tag, expectedTag, StringComparison.Ordinal))
                 {
-                    throw new IOException("the mod list lists " + source.ApprovedVersion + " of " + source.Repo +
+                    throw new IOException("the mod list lists " + expectedTag + " of " + source.Repo +
                                           ", and GitHub returned " + tag + " instead. Nothing was installed");
                 }
 

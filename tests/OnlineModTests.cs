@@ -27,6 +27,7 @@ namespace Switchboard.Tests
             PinnedLive();
             ListingWorks();
             DownloadVerifies();
+            NewestLive();
 
             Console.WriteLine();
             Console.WriteLine(_passed + " passed, " + _failed + " failed");
@@ -272,6 +273,100 @@ namespace Switchboard.Tests
             catch (Exception ex)
             {
                 Check("download and plan succeeded (" + Trim(ex.Message) + ")", false, true);
+            }
+            finally
+            {
+                if (folder != null) ModInstaller.Discard(folder);
+            }
+        }
+
+        /// <summary>
+        /// The other half of the comparison: GitHub's newest release, and an install plan for it.
+        /// </summary>
+        /// <remarks>
+        /// The offline tests build this plan from bytes they choose. This one takes whatever the live
+        /// list and the author's newest release actually are - which is the only way to know that the
+        /// "Install latest" button on a real entry leads anywhere: the newest zip exists, carries the
+        /// files the catalogue names, and plans with the pin deliberately left behind.
+        /// </remarks>
+        private static void NewestLive()
+        {
+            Section("Newest release over the pin");
+
+            ModSource chosen = null;
+            try
+            {
+                foreach (var source in ModCatalogue.FetchCatalogue())
+                {
+                    if (!source.IsPinned || source.Files.Length == 0) continue;
+
+                    ReleaseInfo newest;
+                    try { newest = ModCatalogue.FetchNewest(source); }
+                    catch (Exception) { continue; }
+
+                    if (VersionTag.Same(source.ApprovedVersion, newest.TagName)) continue;
+
+                    chosen = source;
+                    break;
+                }
+            }
+            catch (Exception)
+            {
+                chosen = null;
+            }
+
+            if (chosen == null)
+            {
+                // A list where every pin is current is a good list, not a failure: there is simply
+                // nothing here to compare, and the offline tests cover the mechanics.
+                Console.WriteLine("  note  every pinned entry on the live list is already its newest release");
+                return;
+            }
+
+            Console.WriteLine("  using " + chosen.Repo + ", listed " + chosen.ApprovedVersion);
+
+            var token = Guid.NewGuid().ToString("N").Substring(0, 8);
+            string folder = null;
+
+            try
+            {
+                var newest = ModCatalogue.FetchNewest(chosen);
+                Check("the newest release is a different release from the pin",
+                    VersionTag.Same(chosen.ApprovedVersion, newest.TagName), false);
+                Check("...and is the one an install latest would take", newest.TagName != chosen.ApprovedVersion, true);
+
+                var fetched = ModInstaller.Fetch(newest.Package, token, note => { });
+                folder = fetched.WorkingFolder;
+
+                var installed = GameInstall.Resolve(Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "scamwyf-plancheck-does-not-exist"));
+
+                // The listed release is still what the ordinary path refuses: this is the guarantee
+                // that the second button is the only way to leave a pin.
+                try
+                {
+                    ModInstaller.Plan(newest, fetched.UnpackedFolder, installed);
+                    Check("a plain install refuses the newest release", false, true);
+                }
+                catch (Exception)
+                {
+                    Check("a plain install refuses the newest release", true, true);
+                }
+
+                var plan = ModInstaller.Plan(newest, fetched.UnpackedFolder, installed, true);
+
+                Check("the newest release plans when it is asked for", plan.ListedVersion, chosen.ApprovedVersion);
+                Check("the plan covers every file the catalogue names",
+                    plan.Steps.Count, chosen.Files.Length);
+
+                var text = ModInstaller.Describe(plan);
+                Check("the confirmation says it is not reviewed", text.Contains("Not reviewed"), true);
+                Check("...and names the release it left behind", text.Contains(chosen.ApprovedVersion), true);
+            }
+            catch (Exception ex)
+            {
+                Check("the newest release could be planned (" + Trim(ex.Message) + ")", false, true);
             }
             finally
             {

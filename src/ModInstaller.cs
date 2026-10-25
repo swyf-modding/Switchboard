@@ -46,6 +46,19 @@ namespace Switchboard
 
         /// <summary>Optional setup steps, verified present in the download. Never null.</summary>
         public List<PostInstallStep> Scripts = new List<PostInstallStep>();
+
+        /// <summary>
+        /// The release the mod list lists, set only when this install deliberately installs a
+        /// different one - the newest release, chosen by hand over the reviewed one. Null for every
+        /// install the list asked for.
+        /// </summary>
+        /// <remarks>
+        /// Load-bearing rather than decorative: the catalogue's hashes describe the listed release,
+        /// so they are not applied here, and the confirmation reads this to say in words that nothing
+        /// below has been checked against a review. A plan that skipped those checks silently would
+        /// leave the confirmation claiming the checks passed.
+        /// </remarks>
+        public string ListedVersion;
     }
 
     /// <summary>
@@ -199,7 +212,14 @@ namespace Switchboard
         /// catalogue said it was is either a broken download or something that should not be near a game
         /// folder. Either way the answer is the same: stop and say why.
         /// </remarks>
-        public static InstallPlan Plan(ReleaseInfo release, string unpackedFolder, GameInstall install)
+        /// <param name="installLatest">
+        /// True when the user chose GitHub's newest release over the one the list pins. The pin and the
+        /// recorded hashes describe a different release, so they cannot check this one; the plan says
+        /// so instead of pretending they did, and every structural check - the files being there, being
+        /// assemblies, carrying a plugin - still runs.
+        /// </param>
+        public static InstallPlan Plan(ReleaseInfo release, string unpackedFolder, GameInstall install,
+                                       bool installLatest = false)
         {
             if (release == null) throw new ArgumentNullException("release");
             if (install == null) throw new ArgumentNullException("install");
@@ -209,8 +229,20 @@ namespace Switchboard
             // The release has to be the one the catalogue listed. Fetching the pin makes this true
             // already, and this checks it anyway: the URL path and any later change to the fetch
             // would otherwise be able to install a different release under a pinned entry's name.
-            if (release.Source.IsPinned &&
-                !string.Equals(release.TagName, release.Source.ApprovedVersion, StringComparison.Ordinal))
+            if (installLatest)
+            {
+                // Only a pinned entry has anything to deviate from. An unpinned one already installs
+                // the newest release, so reaching here means the caller took the wrong path.
+                if (!release.Source.IsPinned)
+                {
+                    throw new IOException("this entry does not pin a release, so the newest one is " +
+                                          "already what it installs");
+                }
+
+                plan.ListedVersion = release.Source.ApprovedVersion;
+            }
+            else if (release.Source.IsPinned &&
+                     !string.Equals(release.TagName, release.Source.ApprovedVersion, StringComparison.Ordinal))
             {
                 throw new IOException("this is " + release.TagName + ", and the mod list lists " +
                                       release.Source.ApprovedVersion + ". Nothing was installed");
@@ -228,8 +260,10 @@ namespace Switchboard
 
                 // The file has to be the bytes somebody reviewed, when the catalogue says what
                 // those are. Checked before anything else looks at it, so a wrong file is never
-                // scanned, described or shown as if it were the right one.
-                VerifyPinned(wanted.FileName, wanted.Sha256, Sha256Of(source));
+                // scanned, described or shown as if it were the right one. Skipped when the user
+                // chose a release the catalogue never recorded a hash for - there is nothing to
+                // compare, and hashing to prove nothing would only look like a check.
+                if (plan.ListedVersion == null) VerifyPinned(wanted.FileName, wanted.Sha256, Sha256Of(source));
 
                 // The same reader the Mods tab uses, so a file that would list badly is caught before it
                 // is installed rather than after. Its code is not executed.
@@ -295,7 +329,7 @@ namespace Switchboard
             // typo into a download from wherever the fixer pointed.
             foreach (var declared in release.Source.PostInstall)
             {
-                plan.Scripts.Add(ResolveScript(unpackedFolder, declared));
+                plan.Scripts.Add(ResolveScript(unpackedFolder, declared, plan.ListedVersion == null));
             }
 
             return plan;
@@ -313,7 +347,12 @@ namespace Switchboard
         /// </summary>
         private const char ZipSeparator = '\\';
 
-        private static PostInstallStep ResolveScript(string unpackedFolder, PostInstallStep declared)
+        /// <param name="verifyHash">
+        /// False when the install is of a release the catalogue has no hash for - the newest one, chosen
+        /// by hand. The step is then carried with no hash, so nothing later claims it was checked.
+        /// </param>
+        private static PostInstallStep ResolveScript(string unpackedFolder, PostInstallStep declared,
+                                                     bool verifyHash)
         {
             var path = Path.Combine(unpackedFolder, declared.ScriptName);
 
@@ -331,7 +370,7 @@ namespace Switchboard
 
             // A script is the only thing in an install that reaches a shell, so it is the one that
             // most needs to be the reviewed bytes. Checked before it is read for the prompt.
-            VerifyPinned(declared.ScriptName, declared.Sha256, Sha256Of(path));
+            if (verifyHash) VerifyPinned(declared.ScriptName, declared.Sha256, Sha256Of(path));
 
             string text;
             try
@@ -349,7 +388,7 @@ namespace Switchboard
             }
 
             return new PostInstallStep(declared.ScriptName, declared.Description, path, text,
-                                       declared.Sha256);
+                                       verifyHash ? declared.Sha256 : null);
         }
 
         /// <summary>
@@ -415,45 +454,54 @@ namespace Switchboard
         }
 
         /// <summary>A multi-line description of the plan, for the confirmation box.</summary>
+        /// <remarks>
+        /// Short by design. Every line here is one a person has to read before saying yes, so the ones
+        /// that repeat what an earlier line already said are cut: the release is named once, with the
+        /// zip and its size beside it, rather than again at the bottom.
+        /// </remarks>
         public static string Describe(InstallPlan plan)
         {
             var text = new StringBuilder();
+            var source = plan.Release.Source;
+            var package = plan.Release.Package;
 
-            text.AppendLine(plan.Release.Source.DisplayName + "  " + plan.Release.TagName);
+            text.AppendLine(source.DisplayName + "  " + plan.Release.TagName +
+                            "   (" + package.Name + ", " + Http.Describe(package.Size) + ")");
 
-            // Which repository the files come from. Named for every catalogue install, and loudest for
-            // a third-party one: unlike the project's own releases there is no shared review behind it.
+            // Which repository the files come from. Named for every catalogue install, and marked for a
+            // third-party one: unlike the project's own releases there is no shared review behind it.
             // Skipped when the source names no real repository, which is the URL path - that dialog
             // already names its host in its own words.
-            if (ModCatalogue.IsAccountName(plan.Release.Source.Repo) &&
-                ModCatalogue.IsAccountName(plan.Release.Source.Owner))
+            if (ModCatalogue.IsAccountName(source.Repo) && ModCatalogue.IsAccountName(source.Owner))
             {
-                text.Append("From " + plan.Release.Source.QualifiedName + " on GitHub");
-                if (plan.Release.Source.IsThirdParty)
-                {
-                    text.Append(" - a third-party repository, not this project's own");
-                }
+                text.Append(source.QualifiedName + " on GitHub");
+                if (source.IsThirdParty) text.Append(", third-party");
                 text.AppendLine(".");
             }
 
             text.AppendLine();
 
             // Whether this is the release somebody reviewed, said before the files rather than
-            // after them: it is the sentence that decides how much the rest of the box means.
-            if (plan.Release.Source.IsVerified)
+            // after them: it is the sentence that decides how much the rest of the box means. An
+            // install of the newest release over a pin is the loudest case, so it is first - the
+            // pin is still in the list, and this is the one dialog that has to say it was left behind.
+            if (plan.ListedVersion != null)
             {
-                text.AppendLine("Reviewed: every file below matches the hash the mod list recorded for it when " +
-                                "it was listed, and the install will refuse anything that does not.");
+                text.AppendLine("Not reviewed: " + plan.Release.TagName + " is newer than the " +
+                                plan.ListedVersion + " the list reviewed, so no hash applies.");
             }
-            else if (plan.Release.Source.IsPinned)
+            else if (source.IsVerified)
             {
-                text.AppendLine("Partly reviewed: the mod list lists " + plan.Release.Source.ApprovedVersion +
-                                ", but not every file it installs is pinned to a hash.");
+                text.AppendLine("Reviewed: every file matches the hash the list recorded for it.");
+            }
+            else if (source.IsPinned)
+            {
+                text.AppendLine("Partly reviewed: the list pins " + source.ApprovedVersion +
+                                ", but not every file is hashed.");
             }
             else
             {
-                text.AppendLine("Not reviewed: this entry does not name a release or a hash, so nothing below " +
-                                "has been checked against a release a person looked at.");
+                text.AppendLine("Not reviewed: this entry names no release and no hashes.");
             }
 
             text.AppendLine();
@@ -473,22 +521,18 @@ namespace Switchboard
                 text.AppendLine("    -> " + Path.Combine(folder, step.File.FileName));
 
                 // What the catalogue's scan found it able to reach. Shown for every file, because a
-                // capability that is never mentioned is one nobody can notice appearing.
-                var capabilities = ModCatalogue.DescribeCapabilities(step.File);
-                if (capabilities != null)
+                // capability that is never mentioned is one nobody can notice appearing. Left out for a
+                // release the catalogue never scanned: the list's capabilities belong to the listed
+                // release, and showing them against a different one would be a claim about bytes
+                // nobody has looked at.
+                if (plan.ListedVersion == null)
                 {
-                    text.AppendLine("    " + capabilities);
+                    var capabilities = ModCatalogue.DescribeCapabilities(step.File);
+                    if (capabilities != null) text.AppendLine("    " + capabilities);
                 }
 
-                if (step.IsReplacement)
-                {
-                    text.AppendLine("    replaces " + step.ReplacingVersion);
-                }
+                if (step.IsReplacement) text.AppendLine("    replaces " + step.ReplacingVersion);
             }
-
-            text.AppendLine();
-            text.AppendLine("Files come from " + plan.Release.Package.Name + " on GitHub, " +
-                            Http.Describe(plan.Release.Package.Size) + ".");
 
             // The optional steps, named before anything is agreed to: each is offered separately after
             // installing, and each can be denied. Saying so here is what makes the later prompt expected
@@ -498,20 +542,17 @@ namespace Switchboard
                 text.AppendLine();
                 text.AppendLine("Optional setup: " + script.ScriptName);
                 text.AppendLine("  " + script.Description);
-                text.AppendLine("  Offered after installing; denying it installs nothing less.");
-                if (script.IsPinned)
-                {
-                    text.AppendLine("  Pinned: checked against the hash recorded for it before it is offered.");
-                }
+                text.AppendLine("  Offered after installing; it can be skipped.");
+                if (script.IsPinned) text.AppendLine("  Pinned: hashed before it is offered.");
             }
 
-            if (plan.Release.Package.Sha256 != null)
+            // Only where it is the strongest number in the box. A reviewed install has per-file hashes,
+            // which say more; this one comes from the same place as the file, so it proves the download
+            // was not mangled and nothing else.
+            if (package.Sha256 != null && (plan.ListedVersion != null || !source.IsVerified))
             {
-                // Named as what it is. It comes from the same place as the file, so it proves the
-                // download was not mangled and nothing more - the per-file pins are the review.
                 text.AppendLine();
-                text.AppendLine("GitHub's digest of the download: " + plan.Release.Package.Sha256);
-                text.AppendLine("  (that is what the author uploaded, not a record of a review.)");
+                text.AppendLine("Digest " + package.Sha256 + " (GitHub's, not a review.)");
             }
 
             return text.ToString();
