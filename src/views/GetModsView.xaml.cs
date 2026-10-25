@@ -167,52 +167,42 @@ namespace Switchboard.Views
         }
 
         /// <summary>
-        /// The three versions in one sentence, and which of them is out of step.
+        /// The three versions for the chosen row, and only the parts that are not the plain case.
         /// </summary>
         /// <remarks>
         /// The columns are for scanning; this is for the row that has been chosen. It is the only place
         /// that says a version out loud rather than making two cells be compared, and the only place
-        /// that can say what the button above it would do.
+        /// that can say what the button above it would do - so it carries the versions, then the
+        /// deviations, separated rather than written out as sentences. A row that is current says four
+        /// things and stops; the paragraphs this replaced said the same four things in forty words, on a
+        /// line that sits under the table all the time.
         /// </remarks>
         public string Describe()
         {
-            var text = new StringBuilder(Name);
-            text.Append(": ");
+            var parts = new List<string>(6);
 
-            text.Append(_versions.Listed != null ? "listed " + _versions.Listed : "no listed release");
-            text.Append(", newest " + (_versions.Latest ?? "unknown"));
+            parts.Add(Name);
+            parts.Add(_versions.Listed != null ? "listed " + _versions.Listed : "no listed release");
+            parts.Add("newest " + (_versions.Latest ?? "unknown"));
 
-            if (_installed == null || !_installed.Any) text.Append(", not installed.");
+            if (_installed == null || !_installed.Any) parts.Add("not installed");
             else if (!_installed.Complete)
-            {
-                text.Append(", " + _installed.Present + " of " + _installed.Expected + " files installed.");
-            }
-            else if (string.IsNullOrEmpty(_installed.Version)) text.Append(", installed.");
-            else text.Append(", " + _installed.Version + " installed.");
+                parts.Add(_installed.Present + "/" + _installed.Expected + " files installed");
+            else if (string.IsNullOrEmpty(_installed.Version)) parts.Add("installed");
+            else parts.Add(_installed.Version + " installed");
 
-            if (_versions.LatestIsNewer)
-            {
-                text.Append(" Install latest takes " + _versions.Latest + ", which is not the reviewed release.");
-            }
-            else if (_versions.LatestDiffers)
-            {
-                text.Append(" The newest is not newer than the pin, so there is nothing to update to.");
-            }
+            if (_versions.LatestIsNewer) parts.Add("install latest takes the unreviewed " + _versions.Latest);
+            else if (_versions.LatestDiffers) parts.Add("nothing newer than the pin");
 
             if (_installed != null && _installed.Any && !_installed.Intact)
-            {
-                text.Append(" A file on disk is not the one the list recorded.");
-            }
+                parts.Add("a file is not the one the list recorded");
 
-            if (_versions.LocalDiffers) text.Append(" What is installed is not the listed release.");
-            else if (_versions.LocalIsLatest && _versions.LatestDiffers)
-            {
-                text.Append(" What is installed is already the newest.");
-            }
+            if (_versions.LocalDiffers) parts.Add("installed is not the listed release");
+            else if (_versions.LocalIsLatest && _versions.LatestDiffers) parts.Add("installed is the newest");
 
-            if (_newestProblem != null) text.Append(" The newest could not be read: " + _newestProblem);
+            if (_newestProblem != null) parts.Add("newest unreadable: " + _newestProblem);
 
-            return text.ToString();
+            return string.Join(" \u00b7 ", parts.ToArray());
         }
 
         public event PropertyChangedEventHandler PropertyChanged;
@@ -287,6 +277,7 @@ namespace Switchboard.Views
         public void Reload()
         {
             Summary.Text = "Not checked yet.";
+            ToolTip.SetTip(Summary, null);
             _rows.Clear();
             ShowEmpty("Not checked yet", "The catalogue is read from GitHub when this tab is opened.");
             ShowDetail();
@@ -325,6 +316,102 @@ namespace Switchboard.Views
             if (names.Count <= shown) return string.Join(", ", names.ToArray());
 
             return string.Join(", ", names.GetRange(0, shown).ToArray()) + " and " + (names.Count - shown) + " more";
+        }
+
+        /// <summary>
+        /// The checked answer in as many words as fit on one line: how many entries, whether the pins
+        /// hold, and a count for each kind of thing that is not as listed. No names.
+        /// </summary>
+        /// <remarks>
+        /// It sits under a table and is repeated on the window's status bar, so it is read at a
+        /// glance or not at all. Which entry is out of step is already in the columns - Latest says
+        /// "(newer)", Installed says "(not listed)", and the selected row says the details - so
+        /// naming them here was the same information twice, as a paragraph.
+        /// </remarks>
+        private string ShortReport(int reviewed, List<string> behind, List<string> problems,
+                                   List<string> unreadable, List<string> notListed, bool fallback)
+        {
+            var text = new StringBuilder();
+            text.Append(_rows.Count).Append(_rows.Count == 1 ? " mod" : " mods");
+            if (fallback) text.Append(" (built-in list)");
+
+            // Said only when there is something to count: "all pinned" about no mods at all is the
+            // kind of sentence that makes a person stop believing the status line.
+            if (_rows.Count > 0)
+            {
+                if (reviewed == _rows.Count) text.Append(" \u00b7 all pinned");
+                else if (reviewed == 0) text.Append(" \u00b7 none pinned");
+                else
+                {
+                    text.Append(" \u00b7 ").Append(reviewed).Append(" of ").Append(_rows.Count)
+                        .Append(" pinned");
+                }
+            }
+
+            if (behind.Count > 0) text.Append(" \u00b7 ").Append(behind.Count).Append(" newer");
+            if (problems.Count > 0) text.Append(" \u00b7 ").Append(problems.Count).Append(" unreadable");
+            if (unreadable.Count > 0) text.Append(" \u00b7 ").Append(unreadable.Count).Append(" newest unknown");
+            if (notListed.Count > 0)
+                text.Append(" \u00b7 ").Append(notListed.Count).Append(" not the listed release");
+
+            return text.ToString();
+        }
+
+        /// <summary>
+        /// The same answer spelled out, for the tooltip: the list it came from, the count of reviewed
+        /// entries, and every name and reason behind the counts in the line above.
+        /// </summary>
+        /// <remarks>
+        /// Every clause ends its own sentence. It used to concatenate a list of names straight into
+        /// the next count, so a failed read ("...or have no published release") ran into the results
+        /// ("3 have a newer release...") with nothing between them.
+        /// </remarks>
+        private string LongReport(string listNote, int reviewed, List<string> behind,
+                                  List<string> problems, List<string> unreadable, List<string> notListed)
+        {
+            var text = new StringBuilder();
+            text.Append(_rows.Count).Append(_rows.Count == 1 ? " mod" : " mods")
+                .Append(" checked against GitHub, from the ").Append(listNote).Append(".");
+
+            if (_rows.Count > 0)
+            {
+                if (reviewed == _rows.Count) text.Append(" Every one is pinned to a reviewed release.");
+                else if (reviewed == 0)
+                    text.Append(" None are pinned to a reviewed release, so Install says so for each.");
+                else
+                {
+                    text.Append(" ").Append(reviewed).Append(" of ").Append(_rows.Count)
+                        .Append(" are pinned to a reviewed release; the rest are listed without pins.");
+                }
+            }
+
+            if (problems.Count > 0)
+            {
+                text.Append(" ").Append(problems.Count).Append(" could not be read: ")
+                    .Append(NameFew(problems)).Append(".");
+            }
+
+            if (behind.Count > 0)
+            {
+                text.Append(" ").Append(behind.Count)
+                    .Append(" have a newer release than the list lists: ")
+                    .Append(NameFew(behind)).Append(".");
+            }
+
+            if (notListed.Count > 0)
+            {
+                text.Append(" ").Append(notListed.Count)
+                    .Append(" have something installed that is not the listed release: ")
+                    .Append(NameFew(notListed)).Append(".");
+            }
+
+            if (unreadable.Count > 0)
+            {
+                text.Append(" GitHub's newest release could not be read for ").Append(unreadable.Count)
+                    .Append(", so it is not compared: ").Append(NameFew(unreadable)).Append(".");
+            }
+
+            return text.ToString();
         }
 
         /// <summary>Show the empty state in place of the table, with the given words.</summary>
@@ -480,6 +567,7 @@ namespace Switchboard.Views
             if (!Host.Install.HasBepInEx)
             {
                 Summary.Text = "There is nowhere to put a mod yet.";
+                ToolTip.SetTip(Summary, null);
                 ShowEmpty("No loader installed",
                     "BepInEx has to be installed before a mod has somewhere to go. The Setup tab " +
                     "installs it, and then this tab works.");
@@ -568,37 +656,10 @@ namespace Switchboard.Views
                         if (release.Release.Source.IsVerified) reviewed++;
                     }
 
-                    var report = _rows.Count + " mod(s) checked against GitHub, from the " + listNote + ".";
-
-                    // The count is worth saying out loud. "7 mods" and "7 mods, 6 of them reviewed"
-                    // are different offers, and the difference is the whole point of the pins. Said
-                    // only when there is something to count: "every one is pinned" about no mods at
-                    // all is the kind of sentence that makes a person stop believing the status line.
-                    if (_rows.Count > 0)
-                    {
-                        if (reviewed == _rows.Count)
-                        {
-                            report += " Every one is pinned to a reviewed release.";
-                        }
-                        else if (reviewed == 0)
-                        {
-                            report += " None of them are pinned to a reviewed release, so Install will say so for each.";
-                        }
-                        else
-                        {
-                            report += " " + reviewed + " of them are pinned to a reviewed release; the rest are " +
-                                      "listed without pins and Install will say so.";
-                        }
-                    }
-
-                    if (problems.Count > 0)
-                    {
-                        report += " " + problems.Count + " could not be read. " + NameFew(problems);
-                    }
-
-                    // The deviations, counted and named. A person who does not scroll the list, or who
-                    // does not know that two tags side by side are the point, still gets told that
-                    // something in it is out of step and which entry it is.
+                    // The deviations, tallied per kind. What is counted here is also what the
+                    // columns already show - a row's Latest cell says "(newer)", its Installed cell
+                    // says "(not listed)" - so the line doesn't repeat the names, it says how many
+                    // rows are worth looking at and leaves the list to say which.
                     var behind = new List<string>();
                     var unreadable = new List<string>();
                     var notListed = new List<string>();
@@ -616,28 +677,19 @@ namespace Switchboard.Views
                         if (row.Versions.LocalDiffers) notListed.Add(row.Release.Source.DisplayName);
                     }
 
-                    if (behind.Count > 0)
-                    {
-                        report += " " + behind.Count + " have a newer release than the list lists: " +
-                                  NameFew(behind) + ".";
-                    }
-
-                    if (notListed.Count > 0)
-                    {
-                        report += " " + notListed.Count + " have something installed that is not the listed " +
-                                  "release: " + NameFew(notListed) + ".";
-                    }
-
-                    if (unreadable.Count > 0)
-                    {
-                        report += " GitHub's newest release could not be read for " + unreadable.Count + ", so " +
-                                  "it is not compared: " + NameFew(unreadable) + ".";
-                    }
+                    // One line, because it is read on a status bar and under a table that it must not
+                    // push off the screen. Two versions of the same answer: this for the eye, and the
+                    // whole sentence - names, reasons, the fallback list's error - behind the tooltip.
+                    // The long one used to be on screen, and nine mods of detail is nine mods of
+                    // paragraph where the answer was "everything is fine" or "three things are not".
+                    var summary = ShortReport(reviewed, behind, problems, unreadable, notListed, fallback != null);
+                    var report = LongReport(listNote, reviewed, behind, problems, unreadable, notListed);
 
                     // Passed to SetBusy rather than assigned separately, so the status line is told what
                     // actually happened. It used to keep saying "Checking GitHub..." after the answer had
                     // arrived, which is the sort of thing that makes a person press the button again.
-                    SetBusy(false, report);
+                    SetBusy(false, summary);
+                    ToolTip.SetTip(Summary, report);
 
                     if (_rows.Count > 0) List.SelectedIndex = 0;
 
@@ -1302,8 +1354,14 @@ namespace Switchboard.Views
             {
                 _busy = busy;
 
-                if (message != null) Summary.Text = message;
-                if (message != null) Host.Status(message, true);
+                if (message != null)
+                {
+                    Summary.Text = message;
+                    // A tooltip is the long version of one particular answer; the next short
+                    // message replaces that answer, so it replaces its tooltip with it.
+                    ToolTip.SetTip(Summary, null);
+                    Host.Status(message, true);
+                }
 
                 UpdateButtons();
                 Host.SetBusy(busy);
@@ -1316,6 +1374,7 @@ namespace Switchboard.Views
             OnUi(delegate
             {
                 Summary.Text = message;
+                ToolTip.SetTip(Summary, null);
                 Host.Status(message, true);
             });
         }
