@@ -558,7 +558,7 @@ namespace Switchboard.Views
         }
 
         private void OnCheck(object sender, Avalonia.Interactivity.RoutedEventArgs e) { CheckForUpdates(); }
-        private void OnInstall(object sender, Avalonia.Interactivity.RoutedEventArgs e) { InstallSelected(); }
+        private void OnInstall(object sender, Avalonia.Interactivity.RoutedEventArgs e) { Status("install handler reached"); InstallSelected(); }
         private void OnFromUrl(object sender, Avalonia.Interactivity.RoutedEventArgs e) { InstallFromUrl(); }
 
         private void CheckForUpdates()

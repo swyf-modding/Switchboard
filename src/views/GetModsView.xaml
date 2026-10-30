@@ -127,7 +127,7 @@
             <Button x:Name="CheckButton" Content="Refresh from GitHub" MinWidth="150"
                     Theme="{StaticResource FlatButton}" Click="OnCheck" />
             <Button x:Name="InstallButton" Content="Install..." Margin="8,0,0,0" MinWidth="130"
-                    Theme="{StaticResource AccentButton}" Click="OnInstall" />
+                    Cursor="Hand" Theme="{StaticResource AccentButton}" Click="OnInstall" />
         </StackPanel>
 
         <!--

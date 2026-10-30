@@ -213,6 +213,9 @@
             as a physical thing you press, and it is the site's strongest visual signature.
         -->
         <ControlTheme x:Key="AccentButton" TargetType="Button" BasedOn="{StaticResource FlatButton}">
+            <!-- Stated here as well as inherited: this is the button people are meant to press, and a
+                 primary action that does not offer a hand where other buttons do reads as a label. -->
+            <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Background" Value="{StaticResource AccentBrush}" />
             <Setter Property="BorderBrush" Value="{StaticResource AccentDeepBrush}" />
             <Setter Property="Foreground" Value="{StaticResource PaperInkBrush}" />

@@ -113,7 +113,9 @@ namespace Switchboard
             {
                 Title = title,
                 Icon = App.NewWindowIcon(),
-                Width = 520,
+                // Wide enough for the buttons it has to hold: a second option on the row costs about
+                // 200px, and a button clipped by its own dialog is worse than a wider dialog.
+                Width = alternativeText != null ? 660 : 520,
                 SizeToContent = SizeToContent.Height,
                 MinHeight = 170,
                 CanResize = false,
@@ -123,6 +125,10 @@ namespace Switchboard
                 FontSize = 12,
                 Foreground = Palette.Brush(Palette.Text)
             };
+
+            // Tab stays inside. Without this the focus walks out of a modal dialog into the window it
+            // is blocking, which leaves the buttons behind and reads as a dialog that stopped working.
+            Avalonia.Input.KeyboardNavigation.SetTabNavigation(window, Avalonia.Input.KeyboardNavigationMode.Cycle);
 
             var accept = MakeButton(acceptText, isDefault: defaultAccept, isCancel: false,
                                     accent: severity == DialogSeverity.Error || alternativeText != null);
@@ -182,31 +188,41 @@ namespace Switchboard
             var right = new StackPanel();
             right.Children.Add(body);
 
-            // Everything worth being able to check, closed by default. Consent is not made better by
-            // making it longer: the sentence at the top is the decision, and the file list, the hashes
-            // and what each dll can reach are what somebody opens when they want them.
+            // Everything worth being able to check, closed by default. A button rather than a
+            // disclosure control: one line when closed, and the same one line whether the theme has a
+            // template for it or not.
             if (details != null)
             {
-                right.Children.Add(new Expander
+                var detailText = new TextBlock
                 {
-                    Header = "Details",
-                    IsExpanded = false,
-                    Margin = new Thickness(0, 12, 0, 0),
-                    HorizontalAlignment = HorizontalAlignment.Stretch,
-                    Content = new ScrollViewer
-                    {
-                        Content = new TextBlock
-                        {
-                            Text = details,
-                            TextWrapping = TextWrapping.Wrap,
-                            FontSize = 11,
-                            Foreground = Palette.Brush(Palette.Muted)
-                        },
-                        MaxHeight = 260,
-                        VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                        HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
-                    }
-                });
+                    Text = details,
+                    TextWrapping = TextWrapping.Wrap,
+                    FontSize = 11,
+                    Foreground = Palette.Brush(Palette.Muted)
+                };
+
+                var scroller = new ScrollViewer
+                {
+                    Content = detailText,
+                    MaxHeight = 240,
+                    Margin = new Thickness(0, 8, 0, 0),
+                    IsVisible = false,
+                    VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                    HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
+                };
+
+                var toggle = MakeButton("Details", isDefault: false, isCancel: false, accent: false, subtle: true);
+                toggle.HorizontalAlignment = HorizontalAlignment.Right;
+                toggle.Margin = new Thickness(0, 8, 0, 0);
+                toggle.Click += delegate
+                {
+                    scroller.IsVisible = !scroller.IsVisible;
+                    toggle.Content = scroller.IsVisible ? "Hide details" : "Details";
+                    window.InvalidateMeasure();
+                };
+
+                right.Children.Add(toggle);
+                right.Children.Add(scroller);
             }
 
             right.Children.Add(buttons);
