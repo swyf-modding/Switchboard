@@ -43,6 +43,7 @@ namespace Switchboard.Tests
             BepInExVersionRules();
             SwitchboardUpdateRules();
             VersionDeviations();
+            ReleaseIndexRules();
             InstallRequestRules();
             ModConfigFiles();
 
@@ -1241,6 +1242,79 @@ namespace Switchboard.Tests
         {
             Check("'" + current + "' is not told about '" + latest + "'",
                 UpdateChecker.IsUpdateAvailable(current, latest), false);
+        }
+
+        // ---------------------------------------------------------------- the release snapshot
+
+        /// <summary>
+        /// The snapshot the catalogue's workflow writes, and the rule that a miss is a miss so the
+        /// caller asks GitHub instead of showing nothing.
+        /// </summary>
+        private static void ReleaseIndexRules()
+        {
+            Section("Release snapshot");
+
+            const string snapshot = @"{
+  ""schemaVersion"": 1,
+  ""generatedAt"": ""2026-10-30T06:17:00Z"",
+  ""mods"": [
+    {
+      ""owner"": ""wcixv"",
+      ""repo"": ""chaos-mode"",
+      ""pinned"": { ""tag"": ""v1.2"", ""asset"": ""ChaosMode-v1.2.zip"", ""url"": ""https://github.com/wcixv/chaos-mode/releases/download/v1.2/ChaosMode-v1.2.zip"", ""size"": 29742, ""sha256"": ""abc"" },
+      ""newest"": { ""tag"": ""v1.3"", ""asset"": ""ChaosMode-v1.3.zip"", ""url"": ""https://github.com/wcixv/chaos-mode/releases/download/v1.3/ChaosMode-v1.3.zip"", ""size"": 31400 }
+    },
+    {
+      ""owner"": ""swyf-modding"",
+      ""repo"": ""Voice-Backend"",
+      ""pinned"": { ""tag"": ""v0.5.0"", ""asset"": ""ScamWYF.VoiceBackend.zip"", ""url"": ""https://github.com/swyf-modding/Voice-Backend/releases/download/v0.5.0/ScamWYF.VoiceBackend.zip"", ""size"": 129600 },
+      ""newest"": null
+    },
+    {
+      ""owner"": ""example"",
+      ""repo"": ""no-zip"",
+      ""pinned"": { ""tag"": ""v1.0.0"", ""asset"": ""notes.txt"", ""url"": ""https://github.com/example/no-zip/releases/download/v1.0.0/notes.txt"", ""size"": 12 },
+      ""newest"": null
+    }
+  ]
+}";
+
+            var index = ReleaseIndex.Parse(snapshot);
+            Check("the snapshot reads", index != null, true);
+            Check("it counts its entries", index.Count, 3);
+            Check("it carries when it was written", index.GeneratedAt != null, true);
+
+            var pinned = new ModSource("chaos-mode", "Chaos Mode", "x",
+                new[] { new ModFile("ChaosMode.dll", ModFolder.Plugins, true) }, "wcixv", null, "v1.2");
+
+            var listed = index.Find(pinned, "v1.2");
+            Check("the pinned release comes from the snapshot", listed.TagName, "v1.2");
+            Check("...with its asset", listed.Package.Name, "ChaosMode-v1.2.zip");
+            Check("...its size", listed.Package.Size, 29742L);
+            Check("...and its digest", listed.Package.Sha256, "abc");
+
+            Check("the newest release comes from the snapshot", index.Find(pinned, null).TagName, "v1.3");
+
+            var repinned = new ModSource("chaos-mode", "Chaos Mode", "x",
+                new[] { new ModFile("ChaosMode.dll", ModFolder.Plugins, true) }, "wcixv", null, "v1.4");
+            Check("a pin the snapshot has not seen is a miss, so the caller asks GitHub",
+                index.Find(repinned, "v1.4"), null);
+
+            var unknown = new ModSource("thing", "Thing", "x",
+                new[] { new ModFile("Thing.dll", ModFolder.Plugins, true) }, "example", null, "v1.0.0");
+            Check("an entry the snapshot does not list is a miss", index.Find(unknown, "v1.0.0"), null);
+
+            Check("a release with no zip is a miss", index.Find(new ModSource("no-zip", "No Zip", "x",
+                new[] { new ModFile("x.dll", ModFolder.Plugins, true) }, "example", null, "v1.0.0"), "v1.0.0"), null);
+
+            var noNewest = new ModSource("Voice-Backend", "Voice Backend", "x",
+                new[] { new ModFile("ScamWYF.VoiceBackend.dll", ModFolder.Plugins, true) }, "swyf-modding", null, "v0.5.0");
+            Check("an entry whose newest release is blank is a miss for newest", index.Find(noNewest, null), null);
+            Check("...and still answers for its pin", index.Find(noNewest, "v0.5.0").TagName, "v0.5.0");
+
+            Check("not JSON is a miss rather than a crash", ReleaseIndex.Parse("<html>rate limited</html>"), null);
+            Check("JSON of the wrong shape is a miss", ReleaseIndex.Parse("{\"mods\": 3}"), null);
+            Check("nothing at all is a miss", ReleaseIndex.Parse(""), null);
         }
 
         // ---------------------------------------------------------------- three versions

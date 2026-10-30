@@ -241,6 +241,33 @@ namespace Switchboard
             "https://raw.githubusercontent.com/swyf-modding/ModCatalogue/main/mods.json";
 
         /// <summary>
+        /// What GitHub said about every entry, written weekly by the catalogue's own workflow.
+        /// </summary>
+        /// <remarks>
+        /// Same host and same branch as the list, and for the same reason: a CDN read of a static
+        /// file, so it costs nothing and needs no credential. It is a snapshot rather than a live
+        /// read, which is the trade: an entry approved after the job last ran falls back to the API.
+        /// </remarks>
+        internal const string ReleasesUrl =
+            "https://raw.githubusercontent.com/swyf-modding/ModCatalogue/main/releases.json";
+
+        /// <summary>
+        /// The snapshot, or null when it could not be read. Never throws: a snapshot that is missing
+        /// or stale is slower, not broken, because every miss falls back to the API.
+        /// </summary>
+        public static ReleaseIndex FetchReleaseIndex()
+        {
+            try
+            {
+                return ReleaseIndex.Parse(Http.GetText(ReleasesUrl));
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
         /// The capabilities the catalogue's scan can report, the same list as
         /// tools/scan-capabilities.ps1. A name it cannot produce is refused rather than shown.
         /// </summary>
