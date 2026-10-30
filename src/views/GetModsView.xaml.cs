@@ -191,7 +191,7 @@ namespace Switchboard.Views
             else if (string.IsNullOrEmpty(_installed.Version)) parts.Add("installed");
             else parts.Add(_installed.Version + " installed");
 
-            if (_versions.LatestIsNewer) parts.Add("install latest takes the unreviewed " + _versions.Latest);
+            if (_versions.LatestIsNewer) parts.Add("the newest release is not reviewed");
             else if (_versions.LatestDiffers) parts.Add("nothing newer than the pin");
 
             if (_installed != null && _installed.Any && !_installed.Intact)
@@ -243,6 +243,8 @@ namespace Switchboard.Views
             PurposeText.Text = Purpose;
             List.ItemsSource = _rows;
 
+
+
             // The tab is not looked at until it is opened, and the catalogue is not fetched until
             // then either. Without this the tab would be a blank table for as long as nobody opened
             // it, which reads as broken rather than as "not looked at yet".
@@ -288,16 +290,15 @@ namespace Switchboard.Views
         /// What this tab is for, in one line. Shown under the tab strip.
         /// </summary>
         /// <remarks>
-        /// The warning at the end is not decoration. Installing a mod puts code in the game folder
-        /// that the game will load and run, and that is worth saying at the top of the tab rather
-        /// than only in the small print at the bottom of it.
+        /// What the tab is for, in the line under the tab strip. The warning about running code is
+        /// directly under the table instead, where the buttons are, rather than here: said twice on
+        /// one screen it reads as boilerplate and gets skipped at both ends.
         /// </remarks>
         public string Purpose
         {
             get
             {
-                return "Install a mod from the catalogue, or from a release URL. Installing puts code " +
-                       "in your game folder that the game will load and run.";
+                return "Install a mod from the catalogue, or from a release URL.";
             }
         }
 
@@ -513,17 +514,21 @@ namespace Switchboard.Views
             // Install button offered to install a mod that had nowhere to go.
             var canInstall = Host != null && Host.Install.HasBepInEx;
             var row = Selected;
-            var latest = row != null && row.CanInstallLatest ? row.Newest.TagName : null;
 
             CheckButton.IsEnabled = !_busy && canInstall;
             InstallButton.IsEnabled = !_busy && canInstall && row != null;
             FromUrlButton.IsEnabled = !_busy && canInstall;
             UrlBox.IsEnabled = !_busy && canInstall;
 
-            // Named rather than only enabled: "Install latest" on its own asks a person to remember
-            // what the newest release is, and the whole point of the button is which version it takes.
-            InstallLatestButton.Content = latest != null ? "Install latest (" + latest + ")..." : "Install latest...";
-            InstallLatestButton.IsEnabled = !_busy && canInstall && latest != null;
+            // The review status is in the label because it is the one thing about the release that
+            // matters before it is installed, and the tag because "will this replace what I have"
+            // is the other. The newest release is offered in the confirmation instead: it is not the
+            // one the list vouches for, so it does not get to be a button of the same weight.
+            InstallButton.Content = row == null
+                ? "Install..."
+                : row.Release.Source.IsPinned
+                    ? "Install reviewed (" + row.Release.TagName + ")..."
+                    : "Install (" + row.Release.TagName + ")...";
         }
 
         private ReleaseRow Selected
@@ -538,28 +543,22 @@ namespace Switchboard.Views
         }
 
         /// <summary>
-        /// Put the selected row's three versions under the list, or say nothing when there is no
-        /// selection. Cleared rather than left stale: a sentence about the previous row under a blank
-        /// table is worse than no sentence.
+        /// Put the selected row's three versions under the list. With nothing selected the line
+        /// explains the columns instead of disappearing: it is where a person looks first, and an
+        /// absent line reads as a tab with something missing.
         /// </summary>
         private void ShowDetail()
         {
             var row = Selected;
 
-            if (row == null)
-            {
-                Detail.Text = "";
-                Detail.IsVisible = false;
-                return;
-            }
-
-            Detail.Text = row.Describe();
+            Detail.Text = row == null
+                ? "Release is what Install takes, Newest is the author's latest, Reviewed says whether the list hashed what it installs."
+                : row.Describe();
             Detail.IsVisible = true;
         }
 
         private void OnCheck(object sender, Avalonia.Interactivity.RoutedEventArgs e) { CheckForUpdates(); }
         private void OnInstall(object sender, Avalonia.Interactivity.RoutedEventArgs e) { InstallSelected(); }
-        private void OnInstallLatest(object sender, Avalonia.Interactivity.RoutedEventArgs e) { InstallLatestSelected(); }
         private void OnFromUrl(object sender, Avalonia.Interactivity.RoutedEventArgs e) { InstallFromUrl(); }
 
         private void CheckForUpdates()
@@ -590,8 +589,22 @@ namespace Switchboard.Views
                     ? "live list"
                     : "built-in list (the live one could not be read: " + fallback + ")";
 
+                var position = 0;
                 foreach (var source in sources)
                 {
+                    // Named while it happens: a refresh is one or two requests per entry, and a table
+                    // that sits on its previous contents for ten seconds looks like a button that did
+                    // nothing. Overwritten by the report when the pass is done.
+                    position++;
+                    var current = source;
+                    var step = position;
+                    OnUi(delegate
+                    {
+                        Summary.Text = "Checking " + current.DisplayName + " (" + step + " of " +
+                                       sources.Count + ")...";
+                        ToolTip.SetTip(Summary, null);
+                    });
+
                     try
                     {
                         var listed = ModCatalogue.FetchLatest(source);
@@ -701,8 +714,12 @@ namespace Switchboard.Views
                         // which drew over the buttons below rather than being read.
                         ShowEmpty("No mods in the catalogue",
                             problems.Count > 0
-                                ? "None of the " + problems.Count + " entries could be read: " + NameFew(problems)
+                                ? "None of the " + problems.Count + " entries could be read just now."
                                 : "The catalogue is empty at the moment. Check again later.");
+
+                        // The per-entry reasons are worth having and not worth reading by default; the
+                        // box used to carry all twelve of them on screen.
+                        if (problems.Count > 0) ToolTip.SetTip(EmptyHint, string.Join(Environment.NewLine, problems.ToArray()));
                     }
                     else
                     {
@@ -740,24 +757,7 @@ namespace Switchboard.Views
             var row = Selected;
             if (row == null) return;
 
-            Install(row.Release, false);
-        }
-
-        /// <summary>
-        /// Install GitHub's newest release instead of the one the list pins.
-        /// </summary>
-        /// <remarks>
-        /// The row already holds that release, because the refresh fetched it to compare the tags, so
-        /// this asks GitHub for nothing new. What it does ask for is a different install: the
-        /// catalogue's hashes describe the listed release and cannot check this one, so the plan is
-        /// built in the mode that says so out loud rather than the one that quietly skips the checks.
-        /// </remarks>
-        private void InstallLatestSelected()
-        {
-            var row = Selected;
-            if (row == null || !row.CanInstallLatest) return;
-
-            Install(row.Newest, true);
+            Install(row.Release, false, row.CanInstallLatest ? row.Newest : null);
         }
 
         /// <summary>
@@ -767,7 +767,12 @@ namespace Switchboard.Views
         /// True for the newest release chosen over the listed one - the plan then carries the listed
         /// version so its confirmation can say the hashes did not apply.
         /// </param>
-        private void Install(ReleaseInfo release, bool latestInstead)
+        /// <param name="alternative">
+        /// The newest release to offer in the confirmation, or null when there is nothing to offer.
+        /// Descending into it restarts this method with that release and no alternative, which is what
+        /// stops the dialog asking the same question twice.
+        /// </param>
+        private void Install(ReleaseInfo release, bool latestInstead, ReleaseInfo alternative)
         {
             string running;
             if (ModManager.GameRunning(out running))
@@ -801,7 +806,7 @@ namespace Switchboard.Views
                     OnUi(delegate
                     {
                         SetBusy(false, null);
-                        ConfirmAndApply(plan, release.Source.DisplayName, work);
+                        ConfirmAndApply(plan, release.Source.DisplayName, work, alternative);
                     });
                 }
                 catch (Exception ex)
@@ -826,18 +831,48 @@ namespace Switchboard.Views
         /// whether the user is sure. Replacing an existing file gets its own confirmation, because that is
         /// the only irreversible part - an install into an empty folder can be undone by deleting a file.
         /// </remarks>
-        private async void ConfirmAndApply(InstallPlan plan, string title, string folder)
+        private async void ConfirmAndApply(InstallPlan plan, string title, string folder,
+                                           ReleaseInfo alternative)
         {
             try
             {
-                var text = ModInstaller.Describe(plan);
+                // Two sentences on screen and the rest behind "Details". The old dialog put the file
+                // list, every capability and the digest in the same paragraph as the question, which
+                // is how a confirmation becomes something people click past.
+                var text = ModInstaller.DescribeSummary(plan);
+                var details = ModInstaller.Describe(plan);
 
                 foreach (var warning in plan.Warnings)
                 {
                     text += Environment.NewLine + warning + Environment.NewLine;
                 }
 
-                if (!await Dialogs.ConfirmAsync("Install " + title + "?", text, "Install"))
+                // ListedVersion is set only on the deviating plan, so it says which of the two this is
+                // once a pin exists, and says nothing at all for an entry that never had one.
+                var reviewed = plan.Release.Source.IsPinned && plan.ListedVersion == null
+                    ? "Install reviewed (" + plan.Release.TagName + ")"
+                    : "Install (" + plan.Release.TagName + ")";
+
+                var choice = alternative == null
+                    ? (await Dialogs.ConfirmAsync("Install " + title + "?", text, reviewed,
+                                                  details: details)
+                        ? DialogChoice.Primary
+                        : DialogChoice.Cancel)
+                    : await Dialogs.ChooseAsync("Install " + title + "?", text, reviewed,
+                                                "Install newest (" + alternative.TagName + ", not reviewed)",
+                                                details: details);
+
+                if (choice == DialogChoice.Alternative)
+                {
+                    // Thrown away rather than kept: this is a different release with a different
+                    // digest, and the plan on screen describes files that are not about to be written.
+                    ModInstaller.Discard(folder);
+                    Status("preparing the newest release...");
+                    Install(alternative, true, null);
+                    return;
+                }
+
+                if (choice != DialogChoice.Primary)
                 {
                     ModInstaller.Discard(folder);
                     Status("cancelled - nothing was installed");

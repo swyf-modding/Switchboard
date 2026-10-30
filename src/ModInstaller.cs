@@ -459,6 +459,57 @@ namespace Switchboard
         /// that repeat what an earlier line already said are cut: the release is named once, with the
         /// zip and its size beside it, rather than again at the bottom.
         /// </remarks>
+        /// <summary>
+        /// The short version: what is about to be installed and whether anybody checked it.
+        /// </summary>
+        /// <remarks>
+        /// The dialog that asks for consent shows this and puts <see cref="Describe"/> behind a
+        /// disclosure. Everything in the long form is worth being able to read and not worth reading
+        /// by default: a wall of hashes, paths and capabilities is skimmed, and a skimmed
+        /// confirmation is one that gets clicked through without deciding anything.
+        /// </remarks>
+        public static string DescribeSummary(InstallPlan plan)
+        {
+            if (plan == null) throw new ArgumentNullException("plan");
+
+            var source = plan.Release.Source;
+            var text = new StringBuilder();
+
+            text.Append(source.DisplayName + " " + plan.Release.TagName +
+                        ", " + Http.Describe(plan.Release.Package.Size));
+
+            if (ModCatalogue.IsAccountName(source.Repo) && ModCatalogue.IsAccountName(source.Owner))
+            {
+                text.Append(", from " + source.QualifiedName + " on GitHub");
+                if (source.IsThirdParty) text.Append(" (third-party)");
+            }
+
+            text.AppendLine(".");
+            text.AppendLine();
+
+            if (plan.ListedVersion != null)
+            {
+                text.AppendLine("Not reviewed: " + plan.Release.TagName + " is newer than the " +
+                                plan.ListedVersion + " the list reviewed, so no hash applies.");
+            }
+            else if (source.IsVerified)
+            {
+                text.AppendLine("Reviewed: every file matches the hash the list recorded for it.");
+            }
+            else if (source.IsPinned)
+            {
+                text.AppendLine("Partly reviewed: the list pins " + source.ApprovedVersion +
+                                ", but not every file is hashed.");
+            }
+            else
+            {
+                text.AppendLine("Not reviewed: this entry names no release and no hashes.");
+            }
+
+            text.Append("Changes take effect on the next launch.");
+            return text.ToString();
+        }
+
         public static string Describe(InstallPlan plan)
         {
             var text = new StringBuilder();

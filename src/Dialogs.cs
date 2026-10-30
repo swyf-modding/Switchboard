@@ -18,6 +18,14 @@ namespace Switchboard
         Error
     }
 
+    /// <summary>The answer to <see cref="Dialogs.ChooseAsync"/>.</summary>
+    internal enum DialogChoice
+    {
+        Cancel,
+        Primary,
+        Alternative
+    }
+
     /// <summary>
     /// The switchboard's modal dialogs, built from the theme.
     /// </summary>
@@ -40,10 +48,31 @@ namespace Switchboard
     internal static class Dialogs
     {
         /// <summary>Ask a yes/no question. Returns true only if the accept button was chosen.</summary>
-        public static Task<bool> ConfirmAsync(string title, string message, string acceptText,
-                                              DialogSeverity severity = DialogSeverity.Question)
+        public static async Task<bool> ConfirmAsync(string title, string message, string acceptText,
+                                                    DialogSeverity severity = DialogSeverity.Question,
+                                                    string details = null)
         {
-            return ShowAsync(title, message, severity, acceptText, "Cancel", defaultAccept: false);
+            return await ShowAsync(title, message, severity, acceptText, "Cancel", defaultAccept: false,
+                                   details: details)
+                   == DialogChoice.Primary;
+        }
+
+        /// <summary>
+        /// Ask which of two things to do, with the second one offered quietly.
+        /// </summary>
+        /// <remarks>
+        /// The store this exists for: an install that can take either the release the list reviewed or
+        /// the author's newest, where the reviewed one has to be what a person gets by pressing Enter.
+        /// The alternative is drawn small and muted, so it is readable when looked for and not mistaken
+        /// for the recommended answer.
+        /// </remarks>
+        public static Task<DialogChoice> ChooseAsync(string title, string message, string primaryText,
+                                                     string alternativeText,
+                                                     DialogSeverity severity = DialogSeverity.Question,
+                                                     string details = null)
+        {
+            return ShowAsync(title, message, severity, primaryText, "Cancel", defaultAccept: true,
+                             alternativeText: alternativeText, details: details);
         }
 
         /// <summary>
@@ -53,28 +82,32 @@ namespace Switchboard
         /// "Cancel" would be the wrong word here: declining one setup step offers the next one, so the
         /// button says Skip. Still defaults away from running, like every other confirmation.
         /// </remarks>
-        public static Task<bool> ConfirmSkippableAsync(string title, string message, string acceptText,
-                                                       DialogSeverity severity = DialogSeverity.Question)
+        public static async Task<bool> ConfirmSkippableAsync(string title, string message, string acceptText,
+                                                             DialogSeverity severity = DialogSeverity.Question)
         {
-            return ShowAsync(title, message, severity, acceptText, "Skip", defaultAccept: false);
+            return await ShowAsync(title, message, severity, acceptText, "Skip", defaultAccept: false)
+                   == DialogChoice.Primary;
         }
 
         /// <summary>Say something that needs acknowledging.</summary>
-        public static Task InformAsync(string title, string message)
+        public static async Task<bool> InformAsync(string title, string message)
         {
-            return ShowAsync(title, message, DialogSeverity.Information, "OK", null, defaultAccept: true);
+            return await ShowAsync(title, message, DialogSeverity.Information, "OK", null, defaultAccept: true)
+                   == DialogChoice.Primary;
         }
 
         /// <summary>Report a failure.</summary>
-        public static Task ErrorAsync(string title, string message)
+        public static async Task<bool> ErrorAsync(string title, string message)
         {
-            return ShowAsync(title, message, DialogSeverity.Error, "OK", null, defaultAccept: true);
+            return await ShowAsync(title, message, DialogSeverity.Error, "OK", null, defaultAccept: true)
+                   == DialogChoice.Primary;
         }
 
-        private static async Task<bool> ShowAsync(string title, string message, DialogSeverity severity,
-                                                  string acceptText, string cancelText, bool defaultAccept)
+        private static async Task<DialogChoice> ShowAsync(string title, string message, DialogSeverity severity,
+                                                          string acceptText, string cancelText, bool defaultAccept,
+                                                          string alternativeText = null, string details = null)
         {
-            var answer = false;
+            var answer = DialogChoice.Cancel;
 
             var window = new Window
             {
@@ -92,13 +125,17 @@ namespace Switchboard
             };
 
             var accept = MakeButton(acceptText, isDefault: defaultAccept, isCancel: false,
-                                    accent: severity == DialogSeverity.Error);
+                                    accent: severity == DialogSeverity.Error || alternativeText != null);
             var cancel = cancelText == null
                 ? null
                 : MakeButton(cancelText, isDefault: !defaultAccept, isCancel: true, accent: false);
+            var alternative = alternativeText == null
+                ? null
+                : MakeButton(alternativeText, isDefault: false, isCancel: false, accent: false, subtle: true);
 
-            accept.Click += delegate { answer = true; window.Close(); };
-            if (cancel != null) cancel.Click += delegate { answer = false; window.Close(); };
+            accept.Click += delegate { answer = DialogChoice.Primary; window.Close(); };
+            if (alternative != null) alternative.Click += delegate { answer = DialogChoice.Alternative; window.Close(); };
+            if (cancel != null) cancel.Click += delegate { answer = DialogChoice.Cancel; window.Close(); };
 
             var buttons = new StackPanel
             {
@@ -107,8 +144,9 @@ namespace Switchboard
                 Margin = new Thickness(0, 16, 0, 0)
             };
 
-            // Cancel first, so it sits closest to nothing in particular, and Enter still goes to whichever
-            // button is marked default rather than to the first one on the row.
+            // Least likely on the left: the quiet alternative, then Cancel, then the button the question
+            // is actually asking about. Enter goes to the marked default rather than to the first one.
+            if (alternative != null) buttons.Children.Add(alternative);
             if (cancel != null) buttons.Children.Add(cancel);
             buttons.Children.Add(accept);
 
@@ -143,6 +181,34 @@ namespace Switchboard
 
             var right = new StackPanel();
             right.Children.Add(body);
+
+            // Everything worth being able to check, closed by default. Consent is not made better by
+            // making it longer: the sentence at the top is the decision, and the file list, the hashes
+            // and what each dll can reach are what somebody opens when they want them.
+            if (details != null)
+            {
+                right.Children.Add(new Expander
+                {
+                    Header = "Details",
+                    IsExpanded = false,
+                    Margin = new Thickness(0, 12, 0, 0),
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    Content = new ScrollViewer
+                    {
+                        Content = new TextBlock
+                        {
+                            Text = details,
+                            TextWrapping = TextWrapping.Wrap,
+                            FontSize = 11,
+                            Foreground = Palette.Brush(Palette.Muted)
+                        },
+                        MaxHeight = 260,
+                        VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                        HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
+                    }
+                });
+            }
+
             right.Children.Add(buttons);
             Grid.SetColumn(right, 1);
             grid.Children.Add(right);
@@ -176,12 +242,17 @@ namespace Switchboard
             return answer;
         }
 
-        private static Button MakeButton(string text, bool isDefault, bool isCancel, bool accent)
+        private static Button MakeButton(string text, bool isDefault, bool isCancel, bool accent,
+                                         bool subtle = false)
         {
             return new Button
             {
                 Content = text,
-                MinWidth = 96,
+                // The subtle button is the one nobody is being nudged towards, so it is drawn as a
+                // sentence next to the buttons rather than as a second equal choice.
+                MinWidth = subtle ? 0 : 96,
+                FontSize = subtle ? 11 : 12,
+                Foreground = subtle ? Palette.Brush(Palette.Muted) : Palette.Brush(Palette.Text),
                 Margin = new Thickness(8, 0, 0, 0),
                 IsDefault = isDefault,
                 // Escape closes the dialog as "no". On the OK-only dialogs there is no cancel button, so

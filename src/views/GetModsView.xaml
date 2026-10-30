@@ -52,11 +52,16 @@
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
                 <TextBlock Grid.Column="0" Text="Mod" Classes="columnHeader" />
-                <TextBlock Grid.Column="1" Text="Release" Classes="columnHeader" />
-                <TextBlock Grid.Column="2" Text="Latest" Classes="columnHeader" />
-                <TextBlock Grid.Column="3" Text="Reviewed" Classes="columnHeader" />
-                <TextBlock Grid.Column="4" Text="Size" Classes="columnHeader" />
-                <TextBlock Grid.Column="5" Text="Installed" Classes="columnHeader" />
+                <TextBlock Grid.Column="1" Text="Release" Classes="columnHeader"
+                           ToolTip.Tip="The release Install takes: the one the list reviewed." />
+                <TextBlock Grid.Column="2" Text="Newest" Classes="columnHeader"
+                           ToolTip.Tip="The author's latest release on GitHub. Coloured when it is not the one above." />
+                <TextBlock Grid.Column="3" Text="Reviewed" Classes="columnHeader"
+                           ToolTip.Tip="Whether the list recorded hashes for what it installs: yes, partly, or no." />
+                <TextBlock Grid.Column="4" Text="Size" Classes="columnHeader"
+                           ToolTip.Tip="Download size of the release." />
+                <TextBlock Grid.Column="5" Text="Installed" Classes="columnHeader"
+                           ToolTip.Tip="What is in the game folder now, read from the file itself." />
                 <TextBlock Grid.Column="6" Text="What it does" Classes="columnHeader" />
             </Grid>
 
@@ -66,7 +71,7 @@
                 <ListBox.ItemTemplate>
                     <DataTemplate>
                         <Border Classes="tableRow">
-                            <Grid Height="26">
+                            <Grid Height="28">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="150" />
                                     <ColumnDefinition Width="90" />
@@ -114,18 +119,15 @@
             almost the same words, and that one is about Switchboard itself rather than about the
             mods in the list. Two buttons called "Check for updates" in one window is one too many.
 
-            "Install latest" is separate from "Install" because it is a different offer: Install takes
-            the release the list reviewed, and this one takes the author's newest, which nobody has
-            looked at. It is only ever enabled when those are two different releases, and its label
-            names the version it would install so the difference is visible before it is pressed.
+            One install button. The newest release is offered inside the confirmation, where the
+            difference between it and the reviewed one is a sentence rather than a second button
+            competing with the first.
         -->
         <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,0,0,12">
             <Button x:Name="CheckButton" Content="Refresh from GitHub" MinWidth="150"
                     Theme="{StaticResource FlatButton}" Click="OnCheck" />
             <Button x:Name="InstallButton" Content="Install..." Margin="8,0,0,0" MinWidth="130"
                     Theme="{StaticResource AccentButton}" Click="OnInstall" />
-            <Button x:Name="InstallLatestButton" Content="Install latest..." Margin="8,0,0,0" MinWidth="150"
-                    Theme="{StaticResource FlatButton}" Click="OnInstallLatest" />
         </StackPanel>
 
         <!--
@@ -133,7 +135,7 @@
             is on disk. The columns show them side by side; this says which of them is out of step and
             what installing the newest release would mean, because a colour and a suffix cannot.
         -->
-        <TextBlock x:Name="Detail" Grid.Row="4" Classes="note" Margin="0,0,0,12" IsVisible="False"
+        <TextBlock x:Name="Detail" Grid.Row="4" Classes="note" Margin="0,0,0,12"
                    MaxLines="3" TextTrimming="CharacterEllipsis" />
 
         <!-- The textbox takes the room the row has, rather than a fixed width that does not fit a URL. -->
@@ -154,6 +156,6 @@
         </Grid>
 
         <TextBlock Grid.Row="6" Classes="note" Foreground="{StaticResource WarnBrush}"
-                   Text="Installing puts code in your game folder that the game will load and run. Only install what you trust.&#10;&#10;A reviewed mod installs the release the list names, with every file checked against its recorded SHA-256, and refuses anything that does not match. Install latest takes the author's newest release instead, which nothing has checked.&#10;&#10;Changes take effect on the next launch." />
+                   Text="Installing runs new code inside your game. Install what you trust." />
     </Grid>
 </UserControl>

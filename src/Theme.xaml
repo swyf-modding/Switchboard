@@ -577,6 +577,13 @@
 
     <!-- Fluent draws pointer-over and selection in its own brushes on the item's content presenter.
          Setting them here keeps the same warm browns the rest of the window is made of. -->
+    <!-- Alternating rows, on the container rather than on the row's own border: a fill painted inside
+         the item covers the selection and pointer-over the item draws underneath it, and a table where
+         picking a row does nothing visible is worse than one without stripes. -->
+    <Style Selector="ListBoxItem:nth-child(odd) /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{StaticResource SurfaceShadedBrush}" />
+    </Style>
+
     <Style Selector="ListBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter">
         <Setter Property="Background" Value="{StaticResource SurfaceShadedBrush}" />
     </Style>
