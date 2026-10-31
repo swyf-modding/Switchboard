@@ -456,6 +456,22 @@ namespace Switchboard.Views
             EmptyTitle.Text = title;
             EmptyHint.Text = hint;
             Empty.IsVisible = true;
+            List.IsVisible = false;
+        }
+
+        /// <summary>Put the list back, once there is something in it.</summary>
+        private void HideEmpty()
+        {
+            if (_rows.Count == 0) return;
+            Empty.IsVisible = false;
+            List.IsVisible = true;
+        }
+
+        /// <summary>One row, as its entry is read. Stays in catalogue order because the pass is ordered.</summary>
+        private void AddRow(ReleaseRow row)
+        {
+            _rows.Add(row);
+            HideEmpty();
         }
 
         public void OnTabShown()
@@ -673,8 +689,34 @@ namespace Switchboard.Views
                     ? "live list"
                     : "built-in list (the live one could not be read: " + fallback + ")";
 
+                // Read once, off the UI thread: Cecil opens every dll in both folders, and doing that per
+                // row on the thread that draws the window is the difference between a list that appears
+                // and a window that stalls while it does.
+                var local = LocalFiles.Read(Host.Install);
+
+                // Empty and saying so, before the first request rather than after the last one: a table
+                // still showing the previous answer while it fetches a new one is indistinguishable from
+                // one that is not fetching anything.
+                OnUi(delegate
+                {
+                    _rows.Clear();
+                    ShowEmpty("Checking", "Reading each entry's release from GitHub.");
+                    Summary.Text = "Checking " + sources.Count + " entries...";
+                });
+
+                var done = 0;
                 foreach (var source in sources)
                 {
+                    done++;
+                    var current = source;
+                    var position = done;
+                    OnUi(delegate
+                    {
+                        Summary.Text = "Checking " + current.DisplayName + " (" + position + " of " +
+                                       sources.Count + ")...";
+                        ToolTip.SetTip(Summary, null);
+                    });
+
                     try
                     {
                         var listed = ModCatalogue.FetchLatest(source);
@@ -704,6 +746,12 @@ namespace Switchboard.Views
                         }
 
                         found.Add(new Checked { Release = listed, Newest = newest, NewestProblem = unknown });
+
+                        // Added as it arrives. The pass is two requests per mod, and a list that fills in
+                        // over several seconds answers "is it working" without a spinner.
+                        var row = new ReleaseRow(listed, newest, unknown,
+                                                 InstalledMod.Read(listed.Source, Host.Install, local));
+                        OnUi(delegate { AddRow(row); });
                     }
                     catch (Exception ex)
                     {
@@ -713,25 +761,9 @@ namespace Switchboard.Views
                     }
                 }
 
-                // Read once, off the UI thread: Cecil opens every dll in both folders, and doing that
-                // per row on the thread that draws the window is the difference between a list that
-                // appears and a window that stalls while it does.
-                var local = LocalFiles.Read(Host.Install);
-                var installed = new List<InstalledMod>(found.Count);
-                foreach (var entry in found)
-                {
-                    installed.Add(InstalledMod.Read(entry.Release.Source, Host.Install, local));
-                }
-
                 OnUi(delegate
                 {
-                    _rows.Clear();
-
-                    for (var i = 0; i < found.Count; i++)
-                    {
-                        _rows.Add(new ReleaseRow(found[i].Release, found[i].Newest, found[i].NewestProblem,
-                                                 installed[i]));
-                    }
+                    HideEmpty();
 
                     var reviewed = 0;
                     foreach (var release in found)
