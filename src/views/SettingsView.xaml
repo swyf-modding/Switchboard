@@ -1,0 +1,24 @@
+<UserControl x:Class="Switchboard.Views.SettingsView"
+             xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:views="clr-namespace:Switchboard.Views"
+             Background="Transparent"
+             Padding="16">
+
+    <!--
+        Everything that fixes or explains the install, in one place: the checks and repairs, and the
+        game's own log when a repair does not explain itself.
+
+        Two inner tabs rather than one long page, because the log is read when something is wrong and
+        the checks are read when something is wrong, and stacking them would put the answer below the
+        fold for a window this size.
+    -->
+    <TabControl x:Name="Sections" Padding="0">
+        <TabItem Header="Install" Theme="{StaticResource TabHeader}">
+            <views:SetupView x:Name="SetupPage" />
+        </TabItem>
+        <TabItem Header="Log" Theme="{StaticResource TabHeader}">
+            <views:LogView x:Name="LogPage" />
+        </TabItem>
+    </TabControl>
+</UserControl>

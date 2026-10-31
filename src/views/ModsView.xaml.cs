@@ -146,9 +146,19 @@ namespace Switchboard.Views
             UpdateButtons();
         }
 
-        private void OnDoubleClick(object sender, TappedEventArgs e)
+        /// <summary>Double-clicking a mod opens its settings, which is what people try first.</summary>
+        private void OnRowActivated(object sender, TappedEventArgs e)
         {
-            Toggle();
+            var row = (sender as ListBox) != null ? (sender as ListBox).SelectedItem as ModRow : null;
+            if (row == null) return;
+
+            List.SelectedItem = row;
+            OnConfig(sender, null);
+        }
+
+        private void OnFindMods(object sender, Avalonia.Interactivity.RoutedEventArgs e)
+        {
+            if (Host != null) Host.OpenTab(2);
         }
 
         private void OnRescan(object sender, Avalonia.Interactivity.RoutedEventArgs e) { Reload(); }
