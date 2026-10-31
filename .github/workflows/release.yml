@@ -95,6 +95,13 @@ jobs:
           # existing release rather than replacing it, so recomputing here on a rerun would let a
           # branch build be promoted by merging its commit, or demote a published release when the
           # fetch below fails. Only a release that does not exist yet takes the computed channel.
+          if [[ "$kind" == release ]]; then
+            if ! git fetch --quiet origin main || ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+              echo "::error::$tag is a release tag, and its commit is not on main."
+              exit 1
+            fi
+          fi
+
           recorded="$(gh release view "$tag" --json isPrerelease --jq .isPrerelease 2>/dev/null || true)"
           if [[ -n "$recorded" ]]; then
             echo "prerelease=$recorded" >> "$GITHUB_OUTPUT"
