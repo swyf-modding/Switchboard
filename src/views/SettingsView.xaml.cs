@@ -12,8 +12,11 @@ namespace Switchboard.Views
 
             // The log is read when somebody wants it, which is when they switch to it: it is a file the
             // game writes, so whatever it held when this page was built is stale by the time it is read.
-            Sections.SelectionChanged += delegate
+            // Filtered by source: SelectionChanged bubbles, and the log's own list raises it whenever a
+            // problem is selected. Reloading on that would clear the selection the person just made.
+            Sections.SelectionChanged += delegate(object sender, SelectionChangedEventArgs e)
             {
+                if (!ReferenceEquals(e.Source, Sections)) return;
                 if (Sections.SelectedIndex == 1) LogPage.Reload();
             };
         }

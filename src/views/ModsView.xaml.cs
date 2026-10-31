@@ -145,7 +145,8 @@ namespace Switchboard.Views
 
             foreach (var row in _rows)
             {
-                if (row.Entry != null && string.Equals(row.Entry.Path, path, StringComparison.OrdinalIgnoreCase))
+                // Ordinal: Linux can hold plugins/A.dll and plugins/a.dll at once.
+                if (row.Entry != null && string.Equals(row.Entry.Path, path, StringComparison.Ordinal))
                 {
                     List.SelectedItem = row;
                     return;

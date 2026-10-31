@@ -296,10 +296,15 @@ namespace Switchboard
         }
 
         /// <summary>The Mods tab, with that mod selected rather than the first row.</summary>
+        /// <remarks>
+        /// Queued behind the tab switch rather than called with it. The switch posts its own reload to
+        /// the dispatcher, and that reload selects the first row, so selecting here would be undone by
+        /// it a moment later. Both posts run in order, so this one lands after the reload.
+        /// </remarks>
         public void OpenModsFor(string path)
         {
             OpenTab(1);
-            ModsPage.SelectByPath(path);
+            Dispatcher.UIThread.Post(delegate { ModsPage.SelectByPath(path); }, DispatcherPriority.Background);
         }
 
         /// <summary>Switch tabs from inside a page. 0 Home, 1 Mods, 2 Browse, 3 Settings.</summary>

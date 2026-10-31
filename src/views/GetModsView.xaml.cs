@@ -641,18 +641,11 @@ namespace Switchboard.Views
 
             string accept;
             bool canInstall = !installed;
-            bool updateInstead = false;
 
             if (row.NeedsRepair)
             {
                 accept = "Repair installation";
                 canInstall = true;
-            }
-            else if (installed && row.CanInstallLatest)
-            {
-                accept = "Update to " + row.Newest.TagName;
-                canInstall = true;
-                updateInstead = true;
             }
             else if (installed)
             {
@@ -674,9 +667,10 @@ namespace Switchboard.Views
                 canInstall,
                 row.CanInstallLatest ? row.Newest.TagName : null);
 
-            // "Update to v1.3" is the accept button, so it has to install v1.3. It used to install the
-            // pin under that label, which is the one thing the button promises not to do.
-            if (choice == ModChoice.Reviewed) Install(updateInstead ? row.Newest : row.Release, updateInstead);
+            // The primary button is always the release the list reviewed. An installed mod with a newer
+            // release is offered that release only as the quiet link, because the primary action must
+            // not be the one that skips the hashes the review recorded.
+            if (choice == ModChoice.Reviewed) Install(row.Release, false);
             else if (choice == ModChoice.Newest) Install(row.Newest, true);
         }
 
@@ -1005,16 +999,32 @@ namespace Switchboard.Views
         /// the only irreversible part - an install into an empty folder can be undone by deleting a file.
         /// </remarks>
         /// <summary>
-        /// Write the plan. The popup that offered the install was the consent, so this does not ask
-        /// again; replacing files is still confirmed, because that is the only part with no undo.
+        /// Show what the download turned out to be, and write it only on a yes.
         /// </summary>
+        /// <remarks>
+        /// The popup that offered the install happens before the download, so it cannot say which
+        /// versions are in the zip, where each file lands, or whether the recorded hashes still apply.
+        /// This can, and that is the difference between agreeing to a mod and agreeing to a file.
+        ///
+        /// Warnings are in the same box rather than on the status line, where the install message
+        /// replaced them before they could be read.
+        /// </remarks>
         private async void ApplyPlan(InstallPlan plan, string folder)
         {
             try
             {
-                if (plan.Warnings.Count > 0)
+                var text = ModInstaller.Describe(plan);
+
+                foreach (var warning in plan.Warnings)
                 {
-                    Status(string.Join(" ", plan.Warnings.ToArray()));
+                    text += Environment.NewLine + warning + Environment.NewLine;
+                }
+
+                if (!await Dialogs.ConfirmAsync("Install " + plan.Release.Source.DisplayName + "?", text, "Install"))
+                {
+                    ModInstaller.Discard(folder);
+                    Status("cancelled - nothing was installed");
+                    return;
                 }
 
                 if (ModInstaller.ReplacesAnything(plan))
@@ -1041,8 +1051,7 @@ namespace Switchboard.Views
                 try
                 {
                     var written = ModInstaller.Apply(plan);
-                    Status("installed " + string.Join(", ", written) +
-                           (plan.Warnings.Count > 0 ? " - " + string.Join(" ", plan.Warnings.ToArray()) : ""));
+                    Status("installed " + string.Join(", ", written));
                     RefreshInstalled();
                 }
                 catch (Exception ex)
@@ -1430,8 +1439,7 @@ namespace Switchboard.Views
                 try
                 {
                     var written = ModInstaller.Apply(plan);
-                    Status("installed " + string.Join(", ", written) +
-                           (plan.Warnings.Count > 0 ? " - " + string.Join(" ", plan.Warnings.ToArray()) : ""));
+                    Status("installed " + string.Join(", ", written));
                     RefreshInstalled();
                 }
                 catch (Exception ex)
