@@ -101,6 +101,9 @@ namespace Switchboard.Views
             }
         }
 
+        /// <summary>The state itself, for the label and status helpers.</summary>
+        public InstalledMod InstalledMod { get { return _installed; } }
+
         /// <summary>Whether the entry's own code is on disk.</summary>
         public bool IsInstalled { get { return _installed != null && _installed.Any; } }
 
@@ -115,30 +118,7 @@ namespace Switchboard.Views
         /// has moved on. The version comparison is the same one the tab used to spread over three
         /// columns; there is nowhere else for it to be wrong now.
         /// </summary>
-        public string Status
-        {
-            get
-            {
-                if (_installed == null || !_installed.Any) return "not installed";
-
-                // Installed but short of a file it ships: the library it needs, usually. Named for what
-                // to do about it rather than for the fraction.
-                if (_installed.NeedsRepair)
-                {
-                    return _installed.Missing == 1
-                        ? "needs repair (1 file missing)"
-                        : "needs repair (" + _installed.Missing + " files missing)";
-                }
-
-                if (!_installed.Intact) return "modified";
-
-                var version = string.IsNullOrEmpty(_installed.Version) ? "installed" : _installed.Version + " installed";
-                if (_versions.LocalDiffers) version = _versions.Local + " installed";
-                if (_versions.LatestIsNewer) version += " - update to " + _versions.Latest;
-
-                return version;
-            }
-        }
+        public string Status { get { return ModActions.Status(_installed, _versions); } }
 
         public IBrush StatusBrush
         {
@@ -639,22 +619,9 @@ namespace Switchboard.Views
             var source = row.Release.Source;
             var installed = row.IsInstalled;
 
-            string accept;
-            bool canInstall = !installed;
-
-            if (row.NeedsRepair)
-            {
-                accept = "Repair installation";
-                canInstall = true;
-            }
-            else if (installed)
-            {
-                accept = "Installed (" + (string.IsNullOrEmpty(row.InstalledVersion) ? row.Release.TagName : row.InstalledVersion) + ")";
-            }
-            else
-            {
-                accept = source.IsPinned ? "Install reviewed (" + row.Release.TagName + ")" : "Install " + row.Release.TagName;
-            }
+            var accept = ModActions.AcceptLabel(row.InstalledMod, row.Release.Source, row.Release.TagName,
+                                                row.InstalledVersion);
+            var canInstall = ModActions.CanInstall(row.InstalledMod);
 
             var choice = await Dialogs.ModAsync(
                 row.Name,

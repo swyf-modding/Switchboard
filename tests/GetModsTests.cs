@@ -43,6 +43,7 @@ namespace Switchboard.Tests
             BepInExVersionRules();
             SwitchboardUpdateRules();
             VersionDeviations();
+            WhatTheBrowseTabOffers();
             ReleaseIndexRules();
             InstallRequestRules();
             ModConfigFiles();
@@ -1261,6 +1262,78 @@ namespace Switchboard.Tests
         {
             Check("'" + current + "' is not told about '" + latest + "'",
                 UpdateChecker.IsUpdateAvailable(current, latest), false);
+        }
+
+        // ---------------------------------------------------------------- what the tab offers
+
+        /// <summary>
+        /// The label on the install button and the word in the status column. Both are decided from
+        /// state and both have been wrong in a review: a button that said "Update to v1.3" installed
+        /// the pin, and "partly installed" counted the shared library as progress.
+        /// </summary>
+        private static void WhatTheBrowseTabOffers()
+        {
+            Section("What the Browse tab offers");
+
+            var pinned = new ModSource("chaos-mode", "Chaos Mode", "x",
+                new[] { new ModFile("ChaosMode.dll", ModFolder.Plugins, true) }, "wcixv", null, "v1.2");
+
+            var unpinned = new ModSource("thing", "Thing", "x",
+                new[] { new ModFile("Thing.dll", ModFolder.Plugins, true) }, "example", null, null);
+
+            Check("an absent mod is a reviewed install",
+                ModActions.AcceptLabel(null, pinned, "v1.2", null), "Install reviewed (v1.2)");
+            Check("an unpinned entry has nothing to review",
+                ModActions.AcceptLabel(null, unpinned, "v1.3", null), "Install (v1.3)");
+
+            var present = Installed(any: true, missing: 0, intact: true, version: "1.2.0");
+            Check("an installed mod offers nothing to install",
+                ModActions.CanInstall(present), false);
+            Check("...and says which version is there",
+                ModActions.AcceptLabel(present, pinned, "v1.2", "1.2.0"), "Installed (1.2.0)");
+
+            var repair = Installed(any: true, missing: 1, intact: false, version: "1.2.0");
+            var altered = Installed(any: true, missing: 0, intact: false, version: "1.2.0");
+            Check("a mod missing a file offers a repair",
+                ModActions.CanInstall(repair), true);
+            Check("...by name", ModActions.AcceptLabel(repair, pinned, "v1.2", "1.2.0"), "Repair installation");
+
+            var absent = Installed(any: false, missing: 2, intact: false, version: null);
+            Check("the library alone is still an install", ModActions.CanInstall(absent), true);
+            Check("...not a repair", ModActions.AcceptLabel(absent, pinned, "v1.2", null), "Install reviewed (v1.2)");
+            Check("...and the column says so", ModActions.Status(absent, Versions("v1.2", "v1.3")), "not installed");
+
+            Check("a mod short of a file says which",
+                ModActions.Status(repair, Versions("v1.2", "v1.3")), "needs repair (1 file missing)");
+            Check("altered bytes are called modified",
+                ModActions.Status(altered, Versions("v1.2", "v1.3")), "modified");
+
+            var good = Installed(any: true, missing: 0, intact: true, version: "1.2.0");
+            Check("a current mod says its version",
+                ModActions.Status(good, Versions("v1.2", "v1.2")), "1.2.0 installed");
+            Check("...and mentions a newer release",
+                ModActions.Status(good, Versions("v1.2", "v1.3")), "1.2.0 installed - update to v1.3");
+        }
+
+        /// <summary>An <see cref="InstalledMod"/> in a chosen state, without a game folder.</summary>
+        private static InstalledMod Installed(bool any, int missing, bool intact, string version)
+        {
+            var type = typeof(InstalledMod);
+            var made = System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(type);
+            var flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+            type.GetField("<Missing>k__BackingField", flags).SetValue(made, missing);
+            type.GetField("<HasOwnFiles>k__BackingField", flags).SetValue(made, any);
+            type.GetField("<Version>k__BackingField", flags).SetValue(made, version);
+            type.GetField("<Hashed>k__BackingField", flags).SetValue(made, 1);
+            type.GetField("<Matching>k__BackingField", flags).SetValue(made, intact ? 1 : 0);
+            return (InstalledMod)made;
+        }
+
+        private static ModVersions Versions(string listed, string latest)
+        {
+            var source = new ModSource("thing", "Thing", "x",
+                new[] { new ModFile("Thing.dll", ModFolder.Plugins, true) }, "example", null, listed);
+            return new ModVersions(source, latest, null);
         }
 
         // ---------------------------------------------------------------- the release snapshot

@@ -120,6 +120,28 @@ jobs:
             echo "| Setup ref | $SETUP_REF | |"
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # A tag on a commit that is not on main is a build of a branch, so it is published as a
+      # pre-release and never becomes the version GitHub offers by default. A tag with a hyphen in it
+      # says the same thing about itself. Doing this by hand after each build is a step that gets
+      # forgotten, and forgetting it makes a branch build look like the release.
+      - name: Decide whether this is a pre-release
+        id: channel
+        working-directory: Switchboard
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "Pre-release: the tag names one."
+            exit 0
+          fi
+          if git fetch --quiet origin main && git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "Release: the commit is on main."
+          else
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "Pre-release: the commit is not on main."
+          fi
+
       - uses: softprops/action-gh-release@v2
         with:
           files: |
@@ -127,3 +149,4 @@ jobs:
             Switchboard/dist/win-x64/Switchboard.exe
           generate_release_notes: true
           draft: false
+          prerelease: ${{ steps.channel.outputs.prerelease }}
