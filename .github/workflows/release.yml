@@ -123,9 +123,12 @@ jobs:
       # The version a tag names says what kind of build it is, so this reads the tag rather than
       # trusting whoever pushed it:
       #
-      #   0.0.0           a release, and it has to be on main
-      #   0.0.0-1         a hotfix on a release, also on main
-      #   0.0.0-beta.1    a beta, published as a pre-release
+      #   v0.0.0          a release, and it has to be on main
+      #   v0.0.0-1        a hotfix on a release, also on main
+      #   v0.0.0-beta.1   a beta, published as a pre-release
+      #
+      # Every tag carries the leading v. It is not decoration: it is how a tag is told apart from a
+      # bare number, and the version stamping strips it.
       #
       # A tag that fits none of those fails here, before anything is built, because a version nobody
       # can classify is a version nobody can reason about later.
@@ -138,15 +141,13 @@ jobs:
           set -euo pipefail
           tag="$GITHUB_REF_NAME"
 
-          # An optional leading "v" is accepted: the older tags have one, and both have to keep
-          # working for the versions already published.
-          if [[ "$tag" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$ ]]; then
+          if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$ ]]; then
             kind=beta
-          elif [[ "$tag" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+)?$ ]]; then
+          elif [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+)?$ ]]; then
             kind=release
           else
             echo "::error::$tag is not a version this repository publishes."
-            echo "Use x.y.z for a release, x.y.z-N for a hotfix, x.y.z-beta.N for a beta." >&2
+            echo "Use vx.y.z for a release, vx.y.z-N for a hotfix, vx.y.z-beta.N for a beta." >&2
             exit 1
           fi
 

@@ -40,12 +40,12 @@ The tag says what kind of build it is, and `release.yml` refuses a tag that fits
 
 | Tag | What it is | Where it may point |
 |---|---|---|
-| `1.2.3` | a release | `main` only |
-| `1.2.3-1` | a hotfix on top of 1.2.3 | `main` only |
-| `1.2.3-beta.1` | a beta | any branch, usually `beta` |
+| `v1.2.3` | a release | `main` only |
+| `v1.2.3-1` | a hotfix on top of 1.2.3 | `main` only |
+| `v1.2.3-beta.1` | a beta | any branch, usually `beta` |
 
-A leading `v` is accepted as well, because the tags already published have one and both spellings
-have to keep working. New tags do not need it.
+Every tag carries the leading `v`. A tag without one is refused, because the `v` is what tells a
+version apart from a bare number in a list of refs.
 
 A beta is published as a pre-release and never becomes the version GitHub offers by default, so the
 number people download only moves when a release says it does. A release tag on a commit that is
@@ -60,8 +60,8 @@ Completely automated. From a clean tree:
 cd Switchboard
 ./build.sh                 # what CI will do; catch it before the tag
 ./tools/test-getmods.sh    # the offline assertions
-git tag 1.2.3-beta.1       # or 1.2.3 for a release, from main
-git push origin 1.2.3-beta.1
+git tag v1.2.3-beta.1      # or v1.2.3 for a release, from main
+git push origin v1.2.3-beta.1
 ```
 
 A beta waits for CodeRabbit's review on the pull request to pass before it is tagged. The review has
@@ -75,7 +75,7 @@ with:
 
 ```bash
 gh run watch --repo swyf-modding/Switchboard
-gh release view 1.2.3 --repo swyf-modding/Switchboard
+gh release view v1.2.3 --repo swyf-modding/Switchboard
 ```
 
 Four gates stand between the tag and the published binary, because a wrong version in a release is worse
@@ -94,7 +94,7 @@ uploading a binary by hand.
 To check a tag exists and points where you expect before pushing it:
 
 ```bash
-gh api repos/swyf-modding/Switchboard/git/ref/tags/1.2.3
+gh api repos/swyf-modding/Switchboard/git/ref/tags/v1.2.3
 ```
 
 ### Setup is pinned, not tracked
