@@ -132,6 +132,8 @@ jobs:
       - name: Validate the tag and decide the channel
         id: channel
         working-directory: Switchboard
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           tag="$GITHUB_REF_NAME"
@@ -146,6 +148,17 @@ jobs:
             echo "::error::$tag is not a version this repository publishes."
             echo "Use x.y.z for a release, x.y.z-N for a hotfix, x.y.z-beta.N for a beta." >&2
             exit 1
+          fi
+
+          # A release that already exists keeps the channel it was published with. The action updates an
+          # existing release rather than replacing it, so recomputing here on a rerun would let a
+          # branch build be promoted by merging its commit, or demote a published release when the
+          # fetch below fails. Only a release that does not exist yet takes the computed channel.
+          recorded="$(gh release view "$tag" --json isPrerelease --jq .isPrerelease 2>/dev/null || true)"
+          if [[ -n "$recorded" ]]; then
+            echo "prerelease=$recorded" >> "$GITHUB_OUTPUT"
+            echo "$tag is already published, keeping its channel (prerelease=$recorded)."
+            exit 0
           fi
 
           # A beta is a build of a branch. Anything else is a release, and a release that is not on

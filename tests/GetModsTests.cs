@@ -1287,7 +1287,7 @@ namespace Switchboard.Tests
                 ModActions.AcceptLabel(null, unpinned, "v1.3", null), "Install (v1.3)");
 
             var present = Installed(any: true, missing: 0, intact: true, version: "1.2.0");
-            Check("an installed mod offers nothing to install",
+            Check("an installed mod that matches the list offers nothing to install",
                 ModActions.CanInstall(present), false);
             Check("...and says which version is there",
                 ModActions.AcceptLabel(present, pinned, "v1.2", "1.2.0"), "Installed (1.2.0)");
@@ -1307,6 +1307,10 @@ namespace Switchboard.Tests
                 ModActions.Status(repair, Versions("v1.2", "v1.3")), "needs repair (1 file missing)");
             Check("altered bytes are called modified",
                 ModActions.Status(altered, Versions("v1.2", "v1.3")), "modified");
+            Check("...and the reviewed release can be put back",
+                ModActions.CanInstall(altered), true);
+            Check("...by name", ModActions.AcceptLabel(altered, pinned, "v1.2", "1.2.0"),
+                "Reinstall reviewed (v1.2)");
 
             var good = Installed(any: true, missing: 0, intact: true, version: "1.2.0");
             Check("a current mod says its version",

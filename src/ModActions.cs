@@ -13,11 +13,15 @@ namespace Switchboard
     /// </remarks>
     internal static class ModActions
     {
-        /// <summary>Whether there is anything to do: installed and intact means there is not.</summary>
+        /// <summary>Whether there is anything to do: installed, complete and unchanged means there is not.</summary>
         public static bool CanInstall(InstalledMod installed)
         {
             if (installed == null) return true;
-            return !installed.Any || installed.NeedsRepair;
+
+            // Intact matters: a file that no longer matches the recorded hash is the one case where
+            // installing the reviewed release again is the fix, and no other button restores it. The
+            // newest-release link installs something nobody reviewed, which is not a repair.
+            return !installed.Any || installed.NeedsRepair || !installed.Intact;
         }
 
         /// <summary>
@@ -29,6 +33,11 @@ namespace Switchboard
                                          string installedVersion)
         {
             if (installed != null && installed.NeedsRepair) return "Repair installation";
+
+            if (installed != null && installed.Any && !installed.Intact)
+            {
+                return "Reinstall reviewed (" + listedTag + ")";
+            }
 
             var version = string.IsNullOrEmpty(installedVersion) ? listedTag : installedVersion;
 
