@@ -685,9 +685,27 @@ namespace Switchboard.Views
                 // so the tab says which list it is showing rather than silently serving a stale one.
                 string fallback;
                 var sources = ModCatalogue.FetchSources(out fallback);
+
+                // Read once for the whole pass. Null when it could not be fetched, in which case every
+                // entry falls back to the API exactly as it did before the snapshot existed.
+                var index = ModCatalogue.FetchReleaseIndex();
+
                 var listNote = fallback == null
                     ? "live list"
                     : "built-in list (the live one could not be read: " + fallback + ")";
+
+                // In the tooltip rather than the status line: how old the release data is matters when
+                // something looks out of date, and is noise the rest of the time.
+                if (index != null)
+                {
+                    listNote += index.GeneratedAt != null
+                        ? ", releases as of " + index.GeneratedAt.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm")
+                        : ", releases from the catalogue's last check";
+                }
+                else
+                {
+                    listNote += ", releases read from GitHub just now";
+                }
 
                 // Read once, off the UI thread: Cecil opens every dll in both folders, and doing that per
                 // row on the thread that draws the window is the difference between a list that appears
@@ -700,7 +718,7 @@ namespace Switchboard.Views
                 OnUi(delegate
                 {
                     _rows.Clear();
-                    ShowEmpty("Checking", "Reading each entry's release from GitHub.");
+                    ShowEmpty("Checking", "Reading each entry's release from the catalogue's snapshot, or from GitHub.");
                     Summary.Text = "Checking " + sources.Count + " entries...";
                 });
 
@@ -719,7 +737,9 @@ namespace Switchboard.Views
 
                     try
                     {
-                        var listed = ModCatalogue.FetchLatest(source);
+                        var listed = index != null ? index.Find(source, source.ApprovedVersion) : null;
+                        if (listed == null) listed = ModCatalogue.FetchLatest(source);
+
                         ReleaseInfo newest = listed;
                         string unknown = null;
 
@@ -734,10 +754,11 @@ namespace Switchboard.Views
                         // comparison could not be made.
                         if (source.IsPinned)
                         {
-                            newest = null;
+                            newest = index != null ? index.Find(source, null) : null;
+
                             try
                             {
-                                newest = ModCatalogue.FetchNewest(source);
+                                if (newest == null) newest = ModCatalogue.FetchNewest(source);
                             }
                             catch (Exception ex)
                             {
