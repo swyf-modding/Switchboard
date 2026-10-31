@@ -101,8 +101,11 @@ namespace Switchboard.Views
             }
         }
 
-        /// <summary>Whether any of the entry's files are on disk.</summary>
+        /// <summary>Whether the entry's own code is on disk.</summary>
         public bool IsInstalled { get { return _installed != null && _installed.Any; } }
+
+        /// <summary>Installed, but missing a file it ships, so it needs the same release written again.</summary>
+        public bool NeedsRepair { get { return _installed != null && _installed.NeedsRepair; } }
 
         /// <summary>The version inside the installed file, when there is one.</summary>
         public string InstalledVersion { get { return _installed != null ? _installed.Version : null; } }
@@ -117,7 +120,16 @@ namespace Switchboard.Views
             get
             {
                 if (_installed == null || !_installed.Any) return "not installed";
-                if (!_installed.Complete) return "partly installed";
+
+                // Installed but short of a file it ships: the library it needs, usually. Named for what
+                // to do about it rather than for the fraction.
+                if (_installed.NeedsRepair)
+                {
+                    return _installed.Missing == 1
+                        ? "needs repair (1 file missing)"
+                        : "needs repair (" + _installed.Missing + " files missing)";
+                }
+
                 if (!_installed.Intact) return "modified";
 
                 var version = string.IsNullOrEmpty(_installed.Version) ? "installed" : _installed.Version + " installed";
@@ -133,7 +145,7 @@ namespace Switchboard.Views
             get
             {
                 if (_installed == null || !_installed.Any) return Palette.Brush(Palette.Muted);
-                if (!_installed.Intact) return Palette.Brush(Palette.Warn);
+                if (_installed.NeedsRepair || !_installed.Intact) return Palette.Brush(Palette.Warn);
                 return Palette.Brush(_versions.LatestIsNewer || _versions.LocalDiffers ? Palette.Accent : Palette.Text);
             }
         }
@@ -611,7 +623,12 @@ namespace Switchboard.Views
             string accept;
             bool canInstall = !installed;
 
-            if (installed && row.CanInstallLatest)
+            if (row.NeedsRepair)
+            {
+                accept = "Repair installation";
+                canInstall = true;
+            }
+            else if (installed && row.CanInstallLatest)
             {
                 accept = "Update to " + row.Newest.TagName;
                 canInstall = true;

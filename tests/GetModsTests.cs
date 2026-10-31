@@ -450,6 +450,25 @@ namespace Switchboard.Tests
                 Check("...which is a different version from the library's",
                     installed.Version == ScanVersion(core, "Library.dll"), false);
 
+                // The library on its own is not the mod. Several entries ship the same core dll, so a
+                // player with one of them installed has it for all of them, and calling that "partly
+                // installed" told people they had mods they had never added.
+                File.Delete(pluginPath);
+                var libraryPresent = InstalledMod.Read(source, install, LocalFiles.Read(install));
+                Check("the library alone is not this mod", libraryPresent.Any, false);
+                Check("...so it is not something to repair", libraryPresent.NeedsRepair, false);
+
+                // The mod without the library it needs is the case a repair is for.
+                File.Copy(typeof(GetModsTests).Assembly.Location, pluginPath, true);
+                File.Delete(libraryPath);
+                var missingLibrary = InstalledMod.Read(source, install, LocalFiles.Read(install));
+                Check("the mod is installed", missingLibrary.Any, true);
+                Check("...and it is short of a file", missingLibrary.Missing, 1);
+                Check("...which is what needs repair", missingLibrary.NeedsRepair, true);
+                Check("...and it is not complete", missingLibrary.Complete, false);
+
+                File.Copy(typeof(object).Assembly.Location, libraryPath, true);
+
                 // The shared library's own entry carries no plugin, so the library is the only source.
                 var libraryOnly = new ModSource("mod-lib", "Shared Library", "The library.", new[]
                 {
