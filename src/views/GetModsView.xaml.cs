@@ -566,7 +566,10 @@ namespace Switchboard.Views
 
             List.SelectedItem = match;
             UpdateButtons();
-            InstallSelected();
+
+            // Through the review dialog, like any other install. The link came from the website, which
+            // is not the same as the person at the keyboard having agreed to what the files can reach.
+            ShowMod(match);
         }
 
         private void UpdateButtons()
@@ -609,10 +612,26 @@ namespace Switchboard.Views
         /// </summary>
         private void OnRowTapped(object sender, Avalonia.Input.TappedEventArgs e)
         {
-            var row = Selected;
+            // The row under the pointer, not the selected one: a tap on the empty space below the last
+            // row fires here too, and opening the dialog for whatever happened to be selected means an
+            // install offer for a mod nobody pointed at.
+            var row = RowOf(e.Source);
             if (row == null) return;
 
+            List.SelectedItem = row;
             ShowMod(row);
+        }
+
+        private static ReleaseRow RowOf(object source)
+        {
+            var visual = source as Avalonia.Visual;
+            while (visual != null)
+            {
+                var item = visual as ListBoxItem;
+                if (item != null) return item.DataContext as ReleaseRow;
+                visual = Avalonia.VisualTree.VisualExtensions.GetVisualParent(visual);
+            }
+            return null;
         }
 
         private async void ShowMod(ReleaseRow row)
@@ -622,6 +641,7 @@ namespace Switchboard.Views
 
             string accept;
             bool canInstall = !installed;
+            bool updateInstead = false;
 
             if (row.NeedsRepair)
             {
@@ -632,6 +652,7 @@ namespace Switchboard.Views
             {
                 accept = "Update to " + row.Newest.TagName;
                 canInstall = true;
+                updateInstead = true;
             }
             else if (installed)
             {
@@ -653,7 +674,9 @@ namespace Switchboard.Views
                 canInstall,
                 row.CanInstallLatest ? row.Newest.TagName : null);
 
-            if (choice == ModChoice.Reviewed) Install(row.Release, false);
+            // "Update to v1.3" is the accept button, so it has to install v1.3. It used to install the
+            // pin under that label, which is the one thing the button promises not to do.
+            if (choice == ModChoice.Reviewed) Install(updateInstead ? row.Newest : row.Release, updateInstead);
             else if (choice == ModChoice.Newest) Install(row.Newest, true);
         }
 
@@ -1018,7 +1041,8 @@ namespace Switchboard.Views
                 try
                 {
                     var written = ModInstaller.Apply(plan);
-                    Status("installed " + string.Join(", ", written));
+                    Status("installed " + string.Join(", ", written) +
+                           (plan.Warnings.Count > 0 ? " - " + string.Join(" ", plan.Warnings.ToArray()) : ""));
                     RefreshInstalled();
                 }
                 catch (Exception ex)
@@ -1406,7 +1430,8 @@ namespace Switchboard.Views
                 try
                 {
                     var written = ModInstaller.Apply(plan);
-                    Status("installed " + string.Join(", ", written));
+                    Status("installed " + string.Join(", ", written) +
+                           (plan.Warnings.Count > 0 ? " - " + string.Join(" ", plan.Warnings.ToArray()) : ""));
                     RefreshInstalled();
                 }
                 catch (Exception ex)

@@ -34,11 +34,18 @@ namespace Switchboard.Views
                 ? "No game found. Set SWYG_GAME_DIR or pass the game folder as an argument."
                 : install.Path;
 
+            // Both halves, because BepInEx without the corlib override does not start: saying it is
+            // "in place" while the warning underneath says it is missing is how a broken install gets
+            // read as a working one.
+            var ready = install != null && install.HasBepInEx && install.HasCorlibOverride;
+
             LoaderText.Text = install == null || !install.HasBepInEx
                 ? "BepInEx is not installed yet."
-                : "BepInEx " + GameInstall.BepInExVersion + " and the corlib override are in place.";
+                : !install.HasCorlibOverride
+                    ? "BepInEx " + GameInstall.BepInExVersion + " is installed, but the unstripped corlib is missing."
+                    : "BepInEx " + GameInstall.BepInExVersion + " and the corlib override are in place.";
 
-            FixButton.IsVisible = install != null && install.Exists && !install.HasBepInEx;
+            FixButton.IsVisible = install != null && install.Exists && !ready;
 
             string problem = install == null || !install.Exists
                 ? null
@@ -67,14 +74,12 @@ namespace Switchboard.Views
 
         private static IEnumerable<PluginEntry> Scan(GameInstall install)
         {
-            var entries = PluginScanner.Scan(install.PluginsFolder, null);
-
-            // The disabled folder is part of the answer to "what have I got": a mod that is switched
-            // off is still installed, and hiding it makes the count disagree with the Mods tab.
+            // One scan with both folders: Scan marks the first as enabled and the second as disabled,
+            // so scanning the disabled folder by itself labelled every switched-off mod "enabled".
             var disabled = Path.Combine(install.BepInExRoot, "plugins_disabled");
-            if (Directory.Exists(disabled)) entries.AddRange(PluginScanner.Scan(disabled, null));
 
-            return entries.OrderBy(e => e.DisplayName, StringComparer.OrdinalIgnoreCase);
+            return PluginScanner.Scan(install.PluginsFolder, Directory.Exists(disabled) ? disabled : null)
+                               .OrderBy(e => e.DisplayName, StringComparer.OrdinalIgnoreCase);
         }
 
         private void OnBrowse(object sender, RoutedEventArgs e)
@@ -84,7 +89,8 @@ namespace Switchboard.Views
 
         private void OnFix(object sender, RoutedEventArgs e)
         {
-            if (Host != null) Host.OpenTab(3);
+            // The repair controls, not whatever section Settings was left on.
+            if (Host != null) Host.OpenSettingsForRepair();
         }
 
         private void OnFindMods(object sender, RoutedEventArgs e)
@@ -94,7 +100,13 @@ namespace Switchboard.Views
 
         private void OnRowActivated(object sender, TappedEventArgs e)
         {
-            if (Host != null) Host.OpenTab(1);
+            var row = (sender as ListBox) != null ? (sender as ListBox).SelectedItem as ModRow : null;
+            if (Host == null) return;
+
+            // Carrying the mod across: the Mods tab reloads and selects its first row, so landing there
+            // without it means the next click acts on a different mod than the one that was tapped.
+            if (row != null) Host.OpenModsFor(row.Entry.Path);
+            else Host.OpenTab(1);
         }
     }
 }

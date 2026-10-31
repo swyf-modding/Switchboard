@@ -288,6 +288,20 @@ namespace Switchboard
         /// tab leaves the Get mods row claiming it is installed, and installing one left that row
         /// unchanged too, which is the kind of thing that makes a person distrust the whole window.
         /// </remarks>
+        /// <summary>Settings, on the repair section, for a caller that came to fix something.</summary>
+        public void OpenSettingsForRepair()
+        {
+            OpenTab(3);
+            SettingsPage.ShowInstall();
+        }
+
+        /// <summary>The Mods tab, with that mod selected rather than the first row.</summary>
+        public void OpenModsFor(string path)
+        {
+            OpenTab(1);
+            ModsPage.SelectByPath(path);
+        }
+
         /// <summary>Switch tabs from inside a page. 0 Home, 1 Mods, 2 Browse, 3 Settings.</summary>
         public void OpenTab(int index)
         {

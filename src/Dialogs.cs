@@ -245,8 +245,11 @@ namespace Switchboard
                 Margin = new Thickness(0, 10, 0, 0)
             };
 
-            accept.Click += delegate { window.Close(); };
-            cancel.Click += delegate { box.Text = null; window.Close(); };
+            // Only Continue answers. Closing the window with its X runs the same Closed handler as the
+            // button, and returning whatever had been typed meant a URL nobody agreed to was installed.
+            var accepted = false;
+            accept.Click += delegate { accepted = true; window.Close(); };
+            cancel.Click += delegate { window.Close(); };
 
             var body = new StackPanel();
             body.Children.Add(new TextBlock
@@ -263,7 +266,7 @@ namespace Switchboard
 
             var owner = (Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.MainWindow;
             var closed = new TaskCompletionSource<string>();
-            window.Closed += delegate { closed.TrySetResult(box.Text); };
+            window.Closed += delegate { closed.TrySetResult(accepted ? box.Text : null); };
             if (owner != null && owner != window && owner.IsVisible) window.ShowDialog(owner);
             else window.Show();
             return closed.Task;

@@ -136,6 +136,23 @@ namespace Switchboard.Views
             UpdateButtons();
         }
 
+        /// <summary>Reload, then select the mod at this file path if it is still there.</summary>
+        public void SelectByPath(string path)
+        {
+            Reload();
+
+            if (string.IsNullOrEmpty(path)) return;
+
+            foreach (var row in _rows)
+            {
+                if (row.Entry != null && string.Equals(row.Entry.Path, path, StringComparison.OrdinalIgnoreCase))
+                {
+                    List.SelectedItem = row;
+                    return;
+                }
+            }
+        }
+
         private ModRow Selected
         {
             get { return List.SelectedItem as ModRow; }
