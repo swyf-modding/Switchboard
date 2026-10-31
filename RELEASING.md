@@ -34,15 +34,38 @@ Publishing a mod before `mod-lib` is on the remote gives you a repo whose `build
 
 ## Cutting a Switchboard release
 
+### What a version means here
+
+The tag says what kind of build it is, and `release.yml` refuses a tag that fits none of these:
+
+| Tag | What it is | Where it may point |
+|---|---|---|
+| `v1.2.3` | a release | `main` only |
+| `v1.2.3-1` | a hotfix on top of 1.2.3 | `main` only |
+| `v1.2.3-beta.1` | a beta | any branch, usually `beta` |
+
+Every tag carries the leading `v`. A tag without one is refused, because the `v` is what tells a
+version apart from a bare number in a list of refs.
+
+A beta is published as a pre-release and never becomes the version GitHub offers by default, so the
+number people download only moves when a release says it does. A release tag on a commit that is
+not on `main` fails before anything is built, because a branch build with a release number on it is
+the one mistake here that cannot be undone by deleting a tag.
+
+### Cutting one
+
 Completely automated. From a clean tree:
 
 ```bash
 cd Switchboard
 ./build.sh                 # what CI will do; catch it before the tag
 ./tools/test-getmods.sh    # the offline assertions
-git tag v1.2.3
-git push origin v1.2.3
+git tag v1.2.3-beta.1      # or v1.2.3 for a release, from main
+git push origin v1.2.3-beta.1
 ```
+
+A beta waits for CodeRabbit's review on the pull request to pass before it is tagged. The review has
+found real defects in three separate rounds, and a tag is the point where a fix stops being cheap.
 
 On Windows, `.\build.ps1` and `.\tools\test-getmods.ps1` are the same two commands.
 
@@ -52,7 +75,7 @@ with:
 
 ```bash
 gh run watch --repo swyf-modding/Switchboard
-gh release view v1.2.3 --repo swyf-modding/Switchboard
+gh release view v1.2.3-beta.1 --repo swyf-modding/Switchboard   # the tag you pushed
 ```
 
 Four gates stand between the tag and the published binary, because a wrong version in a release is worse

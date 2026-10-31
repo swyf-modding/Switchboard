@@ -101,6 +101,35 @@ namespace Switchboard.Views
             }
         }
 
+        /// <summary>The state itself, for the label and status helpers.</summary>
+        public InstalledMod InstalledMod { get { return _installed; } }
+
+        /// <summary>Whether the entry's own code is on disk.</summary>
+        public bool IsInstalled { get { return _installed != null && _installed.Any; } }
+
+        /// <summary>Installed, but missing a file it ships, so it needs the same release written again.</summary>
+        public bool NeedsRepair { get { return _installed != null && _installed.NeedsRepair; } }
+
+        /// <summary>The version inside the installed file, when there is one.</summary>
+        public string InstalledVersion { get { return _installed != null ? _installed.Version : null; } }
+
+        /// <summary>
+        /// The right-hand column, in the words a person uses: what is on disk, and whether the list
+        /// has moved on. The version comparison is the same one the tab used to spread over three
+        /// columns; there is nowhere else for it to be wrong now.
+        /// </summary>
+        public string Status { get { return ModActions.Status(_installed, _versions); } }
+
+        public IBrush StatusBrush
+        {
+            get
+            {
+                if (_installed == null || !_installed.Any) return Palette.Brush(Palette.Muted);
+                if (_installed.NeedsRepair || !_installed.Intact) return Palette.Brush(Palette.Warn);
+                return Palette.Brush(_versions.LatestIsNewer || _versions.LocalDiffers ? Palette.Accent : Palette.Text);
+            }
+        }
+
         /// <summary>Whether this row offers installing GitHub's newest release over the pin.</summary>
         public bool CanInstallLatest
         {
@@ -164,6 +193,8 @@ namespace Switchboard.Views
             Raise("Installed");
             Raise("LatestBrush");
             Raise("InstalledBrush");
+            Raise("Status");
+            Raise("StatusBrush");
         }
 
         /// <summary>
@@ -271,7 +302,6 @@ namespace Switchboard.Views
                 row.SetInstalled(InstalledMod.Read(row.Release.Source, Host.Install, local));
             }
 
-            ShowDetail();
         }
 
         public void Reload()
@@ -280,7 +310,6 @@ namespace Switchboard.Views
             ToolTip.SetTip(Summary, null);
             _rows.Clear();
             ShowEmpty("Not checked yet", "The catalogue is read from GitHub when this tab is opened.");
-            ShowDetail();
             UpdateButtons();
         }
 
@@ -296,8 +325,7 @@ namespace Switchboard.Views
         {
             get
             {
-                return "Install a mod from the catalogue, or from a release URL. Installing puts code " +
-                       "in your game folder that the game will load and run.";
+                return "Mods the catalogue carries. Click one for what it does and how to install it.";
             }
         }
 
@@ -420,6 +448,22 @@ namespace Switchboard.Views
             EmptyTitle.Text = title;
             EmptyHint.Text = hint;
             Empty.IsVisible = true;
+            List.IsVisible = false;
+        }
+
+        /// <summary>Put the list back, once there is something in it.</summary>
+        private void HideEmpty()
+        {
+            if (_rows.Count == 0) return;
+            Empty.IsVisible = false;
+            List.IsVisible = true;
+        }
+
+        /// <summary>One row, as its entry is read. Stays in catalogue order because the pass is ordered.</summary>
+        private void AddRow(ReleaseRow row)
+        {
+            _rows.Add(row);
+            HideEmpty();
         }
 
         public void OnTabShown()
@@ -502,7 +546,10 @@ namespace Switchboard.Views
 
             List.SelectedItem = match;
             UpdateButtons();
-            InstallSelected();
+
+            // Through the review dialog, like any other install. The link came from the website, which
+            // is not the same as the person at the keyboard having agreed to what the files can reach.
+            ShowMod(match);
         }
 
         private void UpdateButtons()
@@ -512,18 +559,13 @@ namespace Switchboard.Views
             // state, because the path that found no loader returned before this ran - so the
             // Install button offered to install a mod that had nowhere to go.
             var canInstall = Host != null && Host.Install.HasBepInEx;
-            var row = Selected;
-            var latest = row != null && row.CanInstallLatest ? row.Newest.TagName : null;
 
             CheckButton.IsEnabled = !_busy && canInstall;
-            InstallButton.IsEnabled = !_busy && canInstall && row != null;
-            FromUrlButton.IsEnabled = !_busy && canInstall;
-            UrlBox.IsEnabled = !_busy && canInstall;
+            ExternalButton.IsEnabled = !_busy && canInstall;
 
-            // Named rather than only enabled: "Install latest" on its own asks a person to remember
-            // what the newest release is, and the whole point of the button is which version it takes.
-            InstallLatestButton.Content = latest != null ? "Install latest (" + latest + ")..." : "Install latest...";
-            InstallLatestButton.IsEnabled = !_busy && canInstall && latest != null;
+            WhereText.Text = canInstall
+                ? "Mods are installed into " + Host.Install.PluginsFolder + "."
+                : "";
         }
 
         private ReleaseRow Selected
@@ -533,7 +575,6 @@ namespace Switchboard.Views
 
         private void OnSelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            ShowDetail();
             UpdateButtons();
         }
 
@@ -542,25 +583,84 @@ namespace Switchboard.Views
         /// selection. Cleared rather than left stale: a sentence about the previous row under a blank
         /// table is worse than no sentence.
         /// </summary>
-        private void ShowDetail()
+        private void OnCheck(object sender, Avalonia.Interactivity.RoutedEventArgs e) { CheckForUpdates(); }
+
+        private void OnExternal(object sender, Avalonia.Interactivity.RoutedEventArgs e) { InstallFromUrl(); }
+
+        /// <summary>
+        /// One click on a mod opens what it is and the way to install it.
+        /// </summary>
+        private void OnRowTapped(object sender, Avalonia.Input.TappedEventArgs e)
         {
-            var row = Selected;
+            // The row under the pointer, not the selected one: a tap on the empty space below the last
+            // row fires here too, and opening the dialog for whatever happened to be selected means an
+            // install offer for a mod nobody pointed at.
+            var row = RowOf(e.Source);
+            if (row == null) return;
 
-            if (row == null)
-            {
-                Detail.Text = "";
-                Detail.IsVisible = false;
-                return;
-            }
-
-            Detail.Text = row.Describe();
-            Detail.IsVisible = true;
+            List.SelectedItem = row;
+            ShowMod(row);
         }
 
-        private void OnCheck(object sender, Avalonia.Interactivity.RoutedEventArgs e) { CheckForUpdates(); }
-        private void OnInstall(object sender, Avalonia.Interactivity.RoutedEventArgs e) { InstallSelected(); }
-        private void OnInstallLatest(object sender, Avalonia.Interactivity.RoutedEventArgs e) { InstallLatestSelected(); }
-        private void OnFromUrl(object sender, Avalonia.Interactivity.RoutedEventArgs e) { InstallFromUrl(); }
+        private static ReleaseRow RowOf(object source)
+        {
+            var visual = source as Avalonia.Visual;
+            while (visual != null)
+            {
+                var item = visual as ListBoxItem;
+                if (item != null) return item.DataContext as ReleaseRow;
+                visual = Avalonia.VisualTree.VisualExtensions.GetVisualParent(visual);
+            }
+            return null;
+        }
+
+        private async void ShowMod(ReleaseRow row)
+        {
+            var source = row.Release.Source;
+            var installed = row.IsInstalled;
+
+            var accept = ModActions.AcceptLabel(row.InstalledMod, row.Release.Source, row.Release.TagName,
+                                                row.InstalledVersion);
+            var canInstall = ModActions.CanInstall(row.InstalledMod);
+
+            var choice = await Dialogs.ModAsync(
+                row.Name,
+                source.Summary,
+                ModCatalogue.IsAccountName(source.Owner) && ModCatalogue.IsAccountName(source.Repo)
+                    ? source.QualifiedName + " on GitHub" + (source.IsThirdParty ? ", third-party" : "")
+                    : null,
+                Capabilities(row),
+                accept,
+                canInstall,
+                row.CanInstallLatest ? row.Newest.TagName : null);
+
+            // The primary button is always the release the list reviewed. An installed mod with a newer
+            // release is offered that release only as the quiet link, because the primary action must
+            // not be the one that skips the hashes the review recorded.
+            if (choice == ModChoice.Reviewed) Install(row.Release, false);
+            else if (choice == ModChoice.Newest) Install(row.Newest, true);
+        }
+
+        /// <summary>What installing this entry's files lets the game do, in one line.</summary>
+        private static string Capabilities(ReleaseRow row)
+        {
+            // Union, in catalogue order: two files of one mod reach the same things, and saying so
+            // twice reads like a longer list of powers than it is.
+            var words = new List<string>();
+            foreach (var file in row.Release.Source.Files)
+            {
+                foreach (var capability in file.Capabilities)
+                {
+                    if (!words.Contains(capability)) words.Add(capability);
+                }
+            }
+
+            if (words.Count == 0) return null;
+
+            var described = new List<string>(words.Count);
+            foreach (var capability in words) described.Add(ModCatalogue.DescribeCapability(capability));
+            return string.Join(", ", described.ToArray());
+        }
 
         private void CheckForUpdates()
         {
@@ -586,15 +686,61 @@ namespace Switchboard.Views
                 // so the tab says which list it is showing rather than silently serving a stale one.
                 string fallback;
                 var sources = ModCatalogue.FetchSources(out fallback);
+
+                // Read once for the whole pass. Null when it could not be fetched, in which case every
+                // entry falls back to the API exactly as it did before the snapshot existed.
+                var index = ModCatalogue.FetchReleaseIndex();
+
                 var listNote = fallback == null
                     ? "live list"
                     : "built-in list (the live one could not be read: " + fallback + ")";
 
+                // In the tooltip rather than the status line: how old the release data is matters when
+                // something looks out of date, and is noise the rest of the time.
+                if (index != null)
+                {
+                    listNote += index.GeneratedAt != null
+                        ? ", releases as of " + index.GeneratedAt.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm")
+                        : ", releases from the catalogue's last check";
+                }
+                else
+                {
+                    listNote += ", releases read from GitHub just now";
+                }
+
+                // Read once, off the UI thread: Cecil opens every dll in both folders, and doing that per
+                // row on the thread that draws the window is the difference between a list that appears
+                // and a window that stalls while it does.
+                var local = LocalFiles.Read(Host.Install);
+
+                // Empty and saying so, before the first request rather than after the last one: a table
+                // still showing the previous answer while it fetches a new one is indistinguishable from
+                // one that is not fetching anything.
+                OnUi(delegate
+                {
+                    _rows.Clear();
+                    ShowEmpty("Checking", "Reading each entry's release from the catalogue's snapshot, or from GitHub.");
+                    Summary.Text = "Checking " + sources.Count + " entries...";
+                });
+
+                var done = 0;
                 foreach (var source in sources)
                 {
+                    done++;
+                    var current = source;
+                    var position = done;
+                    OnUi(delegate
+                    {
+                        Summary.Text = "Checking " + current.DisplayName + " (" + position + " of " +
+                                       sources.Count + ")...";
+                        ToolTip.SetTip(Summary, null);
+                    });
+
                     try
                     {
-                        var listed = ModCatalogue.FetchLatest(source);
+                        var listed = index != null ? index.Find(source, source.ApprovedVersion) : null;
+                        if (listed == null) listed = ModCatalogue.FetchLatest(source);
+
                         ReleaseInfo newest = listed;
                         string unknown = null;
 
@@ -609,10 +755,11 @@ namespace Switchboard.Views
                         // comparison could not be made.
                         if (source.IsPinned)
                         {
-                            newest = null;
+                            newest = index != null ? index.Find(source, null) : null;
+
                             try
                             {
-                                newest = ModCatalogue.FetchNewest(source);
+                                if (newest == null) newest = ModCatalogue.FetchNewest(source);
                             }
                             catch (Exception ex)
                             {
@@ -621,6 +768,12 @@ namespace Switchboard.Views
                         }
 
                         found.Add(new Checked { Release = listed, Newest = newest, NewestProblem = unknown });
+
+                        // Added as it arrives. The pass is two requests per mod, and a list that fills in
+                        // over several seconds answers "is it working" without a spinner.
+                        var row = new ReleaseRow(listed, newest, unknown,
+                                                 InstalledMod.Read(listed.Source, Host.Install, local));
+                        OnUi(delegate { AddRow(row); });
                     }
                     catch (Exception ex)
                     {
@@ -630,25 +783,9 @@ namespace Switchboard.Views
                     }
                 }
 
-                // Read once, off the UI thread: Cecil opens every dll in both folders, and doing that
-                // per row on the thread that draws the window is the difference between a list that
-                // appears and a window that stalls while it does.
-                var local = LocalFiles.Read(Host.Install);
-                var installed = new List<InstalledMod>(found.Count);
-                foreach (var entry in found)
-                {
-                    installed.Add(InstalledMod.Read(entry.Release.Source, Host.Install, local));
-                }
-
                 OnUi(delegate
                 {
-                    _rows.Clear();
-
-                    for (var i = 0; i < found.Count; i++)
-                    {
-                        _rows.Add(new ReleaseRow(found[i].Release, found[i].Newest, found[i].NewestProblem,
-                                                 installed[i]));
-                    }
+                    HideEmpty();
 
                     var reviewed = 0;
                     foreach (var release in found)
@@ -699,10 +836,13 @@ namespace Switchboard.Views
                     {
                         // Named, not listed: ten unreachable repositories used to be ten paragraphs here,
                         // which drew over the buttons below rather than being read.
-                        ShowEmpty("No mods in the catalogue",
+                        ShowEmpty("Nothing could be read",
                             problems.Count > 0
-                                ? "None of the " + problems.Count + " entries could be read: " + NameFew(problems)
+                                ? "None of the " + problems.Count + " entries answered. The usual reason is " +
+                                  "GitHub's hourly limit on this address; the whole list is in the tooltip."
                                 : "The catalogue is empty at the moment. Check again later.");
+
+                        if (problems.Count > 0) ToolTip.SetTip(EmptyHint, string.Join(Environment.NewLine, problems.ToArray()));
                     }
                     else
                     {
@@ -710,8 +850,7 @@ namespace Switchboard.Views
                     }
 
                     UpdateButtons();
-                    ShowDetail();
-
+        
                     // A website request that arrived before the list did starts now that
                     // the rows exist. Inside the same UI turn, so no second refresh.
                     if (_pendingOwner != null) TryStartPendingInstall();
@@ -801,7 +940,7 @@ namespace Switchboard.Views
                     OnUi(delegate
                     {
                         SetBusy(false, null);
-                        ConfirmAndApply(plan, release.Source.DisplayName, work);
+                        ApplyPlan(plan, work);
                     });
                 }
                 catch (Exception ex)
@@ -826,7 +965,18 @@ namespace Switchboard.Views
         /// whether the user is sure. Replacing an existing file gets its own confirmation, because that is
         /// the only irreversible part - an install into an empty folder can be undone by deleting a file.
         /// </remarks>
-        private async void ConfirmAndApply(InstallPlan plan, string title, string folder)
+        /// <summary>
+        /// Show what the download turned out to be, and write it only on a yes.
+        /// </summary>
+        /// <remarks>
+        /// The popup that offered the install happens before the download, so it cannot say which
+        /// versions are in the zip, where each file lands, or whether the recorded hashes still apply.
+        /// This can, and that is the difference between agreeing to a mod and agreeing to a file.
+        ///
+        /// Warnings are in the same box rather than on the status line, where the install message
+        /// replaced them before they could be read.
+        /// </remarks>
+        private async void ApplyPlan(InstallPlan plan, string folder)
         {
             try
             {
@@ -837,7 +987,7 @@ namespace Switchboard.Views
                     text += Environment.NewLine + warning + Environment.NewLine;
                 }
 
-                if (!await Dialogs.ConfirmAsync("Install " + title + "?", text, "Install"))
+                if (!await Dialogs.ConfirmAsync("Install " + plan.Release.Source.DisplayName + "?", text, "Install"))
                 {
                     ModInstaller.Discard(folder);
                     Status("cancelled - nothing was installed");
@@ -869,6 +1019,7 @@ namespace Switchboard.Views
                 {
                     var written = ModInstaller.Apply(plan);
                     Status("installed " + string.Join(", ", written));
+                    RefreshInstalled();
                 }
                 catch (Exception ex)
                 {
@@ -1042,9 +1193,15 @@ namespace Switchboard.Views
                                      Environment.NewLine + output);
         }
 
-        private void InstallFromUrl()
+        private async void InstallFromUrl()
         {
-            var url = (UrlBox.Text ?? "").Trim();
+            var entered = await Dialogs.PromptAsync("Install from a URL",
+                "A link to a .zip release asset. For mods the list does not carry, so nothing here has " +
+                "been reviewed and no hash can be checked against one.", "https://github.com/...");
+
+            if (entered == null) return;
+            var url = entered.Trim();
+            if (url.Length == 0) return;
 
             if (!Http.IsAcceptable(url))
             {
@@ -1250,6 +1407,7 @@ namespace Switchboard.Views
                 {
                     var written = ModInstaller.Apply(plan);
                     Status("installed " + string.Join(", ", written));
+                    RefreshInstalled();
                 }
                 catch (Exception ex)
                 {

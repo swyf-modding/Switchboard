@@ -1,0 +1,99 @@
+<UserControl x:Class="Switchboard.Views.HomeView"
+             xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Background="Transparent"
+             Padding="16">
+
+    <!--
+        The first thing the window shows once the loader is in place. It answers three questions and
+        gets out of the way: is the game ready, what have I got installed, and where do I get more.
+
+        Installation lives one tab away, because after the first run it is something a person does
+        once, and the thing they open this program for afterwards is the mods they already have.
+    -->
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" MinHeight="100" />
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0" Background="{StaticResource SurfaceBrush}"
+                BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                CornerRadius="4" Padding="20,16">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0" Spacing="4">
+                    <TextBlock x:Name="TitleText" Classes="emptyTitle" TextAlignment="Left"
+                               Text="Scam With Your Friends" />
+                    <TextBlock x:Name="GameText" Classes="note" />
+                    <TextBlock x:Name="LoaderText" Classes="note" />
+                </StackPanel>
+
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button x:Name="FixButton" Content="Fix installation" MinWidth="130"
+                            Theme="{StaticResource FlatButton}" Click="OnFix" IsVisible="False" />
+                    <Button x:Name="BrowseButton" Content="Browse mods" MinWidth="140" Margin="8,0,0,0"
+                            Theme="{StaticResource AccentButton}" Click="OnBrowse" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- One line, and only when it is true. A warning that is always on screen stops being read. -->
+        <TextBlock x:Name="ProblemText" Grid.Row="1" Classes="note"
+                   Foreground="{StaticResource WarnBrush}" Margin="0,12,0,0" IsVisible="False"
+                   TextWrapping="Wrap" />
+
+        <Grid Grid.Row="2" Margin="0,16,0,0">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <Grid Grid.Row="0" Margin="0,0,0,6">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="InstalledHeading" Classes="columnHeader" Text="Installed" />
+                <Button Grid.Column="1" Content="Find mods" Theme="{StaticResource GhostButton}"
+                        Click="OnFindMods" />
+            </Grid>
+
+            <ListBox x:Name="List" Grid.Row="1" DoubleTapped="OnRowActivated">
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <Border Classes="tableRow">
+                            <Grid Height="30">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="120" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="{Binding Name}" Classes="cell" />
+                                <TextBlock Grid.Column="1" Text="{Binding Version}" Classes="cell"
+                                           Foreground="{StaticResource MutedBrush}" />
+                                <TextBlock Grid.Column="2" Text="{Binding State}" Classes="cell"
+                                           Foreground="{Binding Brush}" Margin="8,0,12,0" />
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+
+            <Border x:Name="Empty" Grid.Row="1" Classes="empty" IsVisible="False">
+                <StackPanel VerticalAlignment="Center" Spacing="10">
+                    <TextBlock Classes="emptyTitle" Text="No mods installed yet" />
+                    <TextBlock Classes="emptyHint" TextAlignment="Center"
+                               Text="Browse the list to add one. Every mod in it names a release somebody reviewed." />
+                    <Button Content="Browse mods" HorizontalAlignment="Center" MinWidth="140"
+                            Theme="{StaticResource AccentButton}" Click="OnBrowse" />
+                </StackPanel>
+            </Border>
+        </Grid>
+    </Grid>
+</UserControl>

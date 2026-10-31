@@ -18,6 +18,14 @@ namespace Switchboard
         Error
     }
 
+    /// <summary>What to do about one mod, from the popup that describes it.</summary>
+    internal enum ModChoice
+    {
+        Close,
+        Reviewed,
+        Newest
+    }
+
     /// <summary>
     /// The switchboard's modal dialogs, built from the theme.
     /// </summary>
@@ -39,6 +47,169 @@ namespace Switchboard
     /// </remarks>
     internal static class Dialogs
     {
+        /// <summary>
+        /// Everything about one mod, and the two ways to install it.
+        /// </summary>
+        /// <remarks>
+        /// The description and the warning are the dialog. Capabilities sit inside the warning rather
+        /// than behind a disclosure, because "this can read your files and use the network" is the
+        /// sentence that decides whether somebody wants it, and a fact you have to go looking for is
+        /// one that gets skipped.
+        ///
+        /// The newest release is a link rather than a button. It installs code nobody checked, so it
+        /// should take a second look to find, and it should never look like the thing to press.
+        /// </remarks>
+        public static Task<ModChoice> ModAsync(string name, string description, string source,
+                                               string capabilities, string acceptText, bool canInstall,
+                                               string newestTag)
+        {
+            var choice = ModChoice.Close;
+
+            var window = Shell(name, 620, out var accept, out var cancel, out var buttons);
+            accept.Content = acceptText;
+            accept.IsEnabled = canInstall;
+            accept.Click += delegate { choice = ModChoice.Reviewed; window.Close(); };
+            accept.IsDefault = canInstall;
+
+            cancel.Content = "Close";
+            cancel.IsCancel = true;
+            cancel.Click += delegate { choice = ModChoice.Close; window.Close(); };
+
+            var body = new StackPanel { Spacing = 10 };
+
+            if (!string.IsNullOrEmpty(description))
+            {
+                body.Children.Add(new TextBlock
+                {
+                    Text = description,
+                    TextWrapping = TextWrapping.Wrap,
+                    Foreground = Palette.Brush(Palette.Text),
+                    FontSize = 12.5
+                });
+            }
+
+            if (!string.IsNullOrEmpty(source))
+            {
+                body.Children.Add(new TextBlock
+                {
+                    Text = source,
+                    TextWrapping = TextWrapping.Wrap,
+                    Foreground = Palette.Brush(Palette.Muted),
+                    FontSize = 11
+                });
+            }
+
+            // The warning, with what the files can reach inside it. This is the only place on the
+            // window that says it: repeated on the page it became furniture.
+            var warning = new TextBlock
+            {
+                TextWrapping = TextWrapping.Wrap,
+                FontSize = 11.5,
+                Foreground = Palette.Brush(Palette.Warn),
+                Text = "Installing runs new code inside your game. Only install what you trust."
+            };
+
+            var band = new StackPanel { Spacing = 4 };
+            band.Children.Add(warning);
+
+            if (!string.IsNullOrEmpty(capabilities))
+            {
+                band.Children.Add(new TextBlock
+                {
+                    Text = "It can " + capabilities + ".",
+                    TextWrapping = TextWrapping.Wrap,
+                    FontSize = 11.5,
+                    Foreground = Palette.Brush(Palette.Warn)
+                });
+            }
+
+            body.Children.Add(new Border
+            {
+                Background = Palette.Brush(Palette.AccentMuted),
+                BorderBrush = Palette.Brush(Palette.Warn),
+                BorderThickness = new Thickness(2, 0, 0, 0),
+                Padding = new Thickness(10, 8, 10, 8),
+                Child = band
+            });
+
+            // The newest release, as a link. Deliberately quiet: small, muted, underlined, and after
+            // the two buttons rather than among them.
+            if (newestTag != null)
+            {
+                var link = new Button
+                {
+                    Content = new TextBlock
+                    {
+                        Text = "install the newest release instead (" + newestTag + ", not reviewed)",
+                        FontSize = 10.5,
+                        TextDecorations = TextDecorations.Underline,
+                        Foreground = Palette.Brush(Palette.Faint)
+                    },
+                    Theme = Palette.ControlTheme("GhostButton"),
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    Margin = new Thickness(0, 4, 0, 0)
+                };
+                link.Click += delegate { choice = ModChoice.Newest; window.Close(); };
+                body.Children.Add(link);
+            }
+
+            body.Children.Add(buttons);
+
+            window.Content = new Border { Padding = new Thickness(18, 16, 18, 16), Child = body };
+
+            var owner = (Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.MainWindow;
+            if (owner != null && owner != window && owner.IsVisible)
+            {
+                window.ShowDialog(owner);
+            }
+            else
+            {
+                window.Show();
+            }
+
+            // The caller awaits the window closing rather than the dialog, because two of the three
+            // answers close it too: a TaskCompletionSource keeps that one shape.
+            var closed = new TaskCompletionSource<ModChoice>();
+            window.Closed += delegate { closed.TrySetResult(choice); };
+            return closed.Task;
+        }
+
+        /// <summary>A window with the theme applied and a right-aligned button row, ready to fill in.</summary>
+        private static Window Shell(string title, double width, out Button accept, out Button cancel,
+                                    out StackPanel buttons)
+        {
+            var window = new Window
+            {
+                Title = title,
+                Icon = App.NewWindowIcon(),
+                Width = width,
+                SizeToContent = SizeToContent.Height,
+                CanResize = false,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                ShowInTaskbar = false,
+                Background = Palette.Brush(Palette.Surface),
+                FontSize = 12,
+                Foreground = Palette.Brush(Palette.Text)
+            };
+
+            Avalonia.Input.KeyboardNavigation.SetTabNavigation(window, Avalonia.Input.KeyboardNavigationMode.Cycle);
+
+            accept = MakeButton("", false, false, false);
+            cancel = MakeButton("", false, false, false);
+
+            buttons = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Spacing = 8,
+                Margin = new Thickness(0, 8, 0, 0)
+            };
+            buttons.Children.Add(cancel);
+            buttons.Children.Add(accept);
+
+            return window;
+        }
+
         /// <summary>Ask a yes/no question. Returns true only if the accept button was chosen.</summary>
         public static Task<bool> ConfirmAsync(string title, string message, string acceptText,
                                               DialogSeverity severity = DialogSeverity.Question)
@@ -57,6 +228,48 @@ namespace Switchboard
                                                        DialogSeverity severity = DialogSeverity.Question)
         {
             return ShowAsync(title, message, severity, acceptText, "Skip", defaultAccept: false);
+        }
+
+        /// <summary>Ask for one line of text. Null when it was cancelled.</summary>
+        public static Task<string> PromptAsync(string title, string message, string placeholder)
+        {
+            var window = Shell(title, 560, out var accept, out var cancel, out var buttons);
+            accept.Content = "Continue";
+            cancel.Content = "Cancel";
+            accept.IsCancel = false;
+            cancel.IsCancel = true;
+
+            var box = new TextBox
+            {
+                Watermark = placeholder,
+                Margin = new Thickness(0, 10, 0, 0)
+            };
+
+            // Only Continue answers. Closing the window with its X runs the same Closed handler as the
+            // button, and returning whatever had been typed meant a URL nobody agreed to was installed.
+            var accepted = false;
+            accept.Click += delegate { accepted = true; window.Close(); };
+            cancel.Click += delegate { window.Close(); };
+
+            var body = new StackPanel();
+            body.Children.Add(new TextBlock
+            {
+                Text = message,
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = Palette.Brush(Palette.Text)
+            });
+            body.Children.Add(box);
+            body.Children.Add(buttons);
+
+            window.Content = new Border { Padding = new Thickness(18, 16, 18, 16), Child = body };
+            window.Opened += delegate { box.Focus(); };
+
+            var owner = (Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.MainWindow;
+            var closed = new TaskCompletionSource<string>();
+            window.Closed += delegate { closed.TrySetResult(accepted ? box.Text : null); };
+            if (owner != null && owner != window && owner.IsVisible) window.ShowDialog(owner);
+            else window.Show();
+            return closed.Task;
         }
 
         /// <summary>Say something that needs acknowledging.</summary>
@@ -176,6 +389,7 @@ namespace Switchboard
             return answer;
         }
 
+        /// <summary>A button in the window's theme, without the row plumbing.</summary>
         private static Button MakeButton(string text, bool isDefault, bool isCancel, bool accent)
         {
             return new Button

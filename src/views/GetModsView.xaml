@@ -35,56 +35,31 @@
         <TextBlock x:Name="Summary" Grid.Row="1" Classes="status" MaxLines="3"
                    TextTrimming="CharacterEllipsis" />
 
-        <Grid Grid.Row="2" Margin="0,0,0,12">
+        <Grid Grid.Row="2" Margin="0,0,0,12" ClipToBounds="True">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
-            <Grid Grid.Row="0" Margin="0,0,0,4">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="150" />
-                    <ColumnDefinition Width="90" />
-                    <ColumnDefinition Width="124" />
-                    <ColumnDefinition Width="80" />
-                    <ColumnDefinition Width="64" />
-                    <ColumnDefinition Width="144" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
-                <TextBlock Grid.Column="0" Text="Mod" Classes="columnHeader" />
-                <TextBlock Grid.Column="1" Text="Release" Classes="columnHeader" />
-                <TextBlock Grid.Column="2" Text="Latest" Classes="columnHeader" />
-                <TextBlock Grid.Column="3" Text="Reviewed" Classes="columnHeader" />
-                <TextBlock Grid.Column="4" Text="Size" Classes="columnHeader" />
-                <TextBlock Grid.Column="5" Text="Installed" Classes="columnHeader" />
-                <TextBlock Grid.Column="6" Text="What it does" Classes="columnHeader" />
-            </Grid>
+            <TextBlock Grid.Row="0" Text="Mods in the catalogue" Classes="columnHeader" Margin="0,0,0,4" />
 
-            <Border Grid.Row="0" Classes="rule" VerticalAlignment="Bottom" />
-
-            <ListBox x:Name="List" Grid.Row="1" SelectionChanged="OnSelectionChanged">
+            <ListBox x:Name="List" Grid.Row="1" Tapped="OnRowTapped">
                 <ListBox.ItemTemplate>
                     <DataTemplate>
                         <Border Classes="tableRow">
-                            <Grid Height="26">
+                            <Grid Height="44" Margin="8,0">
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="150" />
-                                    <ColumnDefinition Width="90" />
-                                    <ColumnDefinition Width="124" />
-                                    <ColumnDefinition Width="80" />
-                                    <ColumnDefinition Width="64" />
-                                    <ColumnDefinition Width="144" />
                                     <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
-                                <TextBlock Grid.Column="0" Text="{Binding Name}" Classes="cell" />
-                                <TextBlock Grid.Column="1" Text="{Binding Tag}" Classes="cell" />
-                                <TextBlock Grid.Column="2" Text="{Binding Latest}" Classes="cell"
-                                           Foreground="{Binding LatestBrush}" />
-                                <TextBlock Grid.Column="3" Text="{Binding Reviewed}" Classes="cell" />
-                                <TextBlock Grid.Column="4" Text="{Binding Size}" Classes="cell" />
-                                <TextBlock Grid.Column="5" Text="{Binding Installed}" Classes="cell"
-                                           Foreground="{Binding InstalledBrush}" />
-                                <TextBlock Grid.Column="6" Text="{Binding What}" Classes="cell" />
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="1">
+                                    <TextBlock Text="{Binding Name}" FontSize="13" />
+                                    <TextBlock Text="{Binding What}" FontSize="11.5"
+                                               Foreground="{StaticResource MutedBrush}"
+                                               TextTrimming="CharacterEllipsis" />
+                                </StackPanel>
+                                <TextBlock Grid.Column="1" Text="{Binding Status}" Classes="cell"
+                                           Foreground="{Binding StatusBrush}" Margin="8,0,12,0" />
                             </Grid>
                         </Border>
                     </DataTemplate>
@@ -109,51 +84,17 @@
             </Border>
         </Grid>
 
-        <!--
-            "Refresh from GitHub" rather than "Check for updates": the status bar has a button with
-            almost the same words, and that one is about Switchboard itself rather than about the
-            mods in the list. Two buttons called "Check for updates" in one window is one too many.
-
-            "Install latest" is separate from "Install" because it is a different offer: Install takes
-            the release the list reviewed, and this one takes the author's newest, which nobody has
-            looked at. It is only ever enabled when those are two different releases, and its label
-            names the version it would install so the difference is visible before it is pressed.
-        -->
+        <!-- Two quiet actions. Installing happens in the popup for the mod it belongs to, so nothing
+             on this row of the page is the loudest thing on the tab. -->
         <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,0,0,12">
-            <Button x:Name="CheckButton" Content="Refresh from GitHub" MinWidth="150"
+            <Button x:Name="CheckButton" Content="Refresh" MinWidth="110"
                     Theme="{StaticResource FlatButton}" Click="OnCheck" />
-            <Button x:Name="InstallButton" Content="Install..." Margin="8,0,0,0" MinWidth="130"
-                    Theme="{StaticResource AccentButton}" Click="OnInstall" />
-            <Button x:Name="InstallLatestButton" Content="Install latest..." Margin="8,0,0,0" MinWidth="150"
-                    Theme="{StaticResource FlatButton}" Click="OnInstallLatest" />
+            <Button x:Name="ExternalButton" Content="Install External" MinWidth="140" Margin="8,0,0,0"
+                    Theme="{StaticResource FlatButton}" Click="OnExternal" />
         </StackPanel>
 
-        <!--
-            The selected row's three versions in a sentence: what the list lists, what GitHub has, what
-            is on disk. The columns show them side by side; this says which of them is out of step and
-            what installing the newest release would mean, because a colour and a suffix cannot.
-        -->
-        <TextBlock x:Name="Detail" Grid.Row="4" Classes="note" Margin="0,0,0,12" IsVisible="False"
-                   MaxLines="3" TextTrimming="CharacterEllipsis" />
+        <!-- The extents the list is installed into, said once, quietly. -->
+        <TextBlock Grid.Row="4" x:Name="WhereText" Classes="note" Margin="0,0,0,12" />
 
-        <!-- The textbox takes the room the row has, rather than a fixed width that does not fit a URL. -->
-        <Grid Grid.Row="5" Margin="0,0,0,12">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-
-            <TextBlock Grid.Column="0" Text="Install a dll from a URL"
-                       VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" Margin="0,0,8,0" />
-
-            <TextBox x:Name="UrlBox" Grid.Column="1" VerticalContentAlignment="Center" />
-
-            <Button x:Name="FromUrlButton" Grid.Column="2" Content="Download and install..." Margin="8,0,0,0"
-                    Theme="{StaticResource FlatButton}" Click="OnFromUrl" />
-        </Grid>
-
-        <TextBlock Grid.Row="6" Classes="note" Foreground="{StaticResource WarnBrush}"
-                   Text="Installing puts code in your game folder that the game will load and run. Only install what you trust.&#10;&#10;A reviewed mod installs the release the list names, with every file checked against its recorded SHA-256, and refuses anything that does not match. Install latest takes the author's newest release instead, which nothing has checked.&#10;&#10;Changes take effect on the next launch." />
     </Grid>
 </UserControl>

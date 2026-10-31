@@ -99,17 +99,17 @@
             so it sits with the content it describes rather than above the navigation.
         -->
         <TabControl x:Name="Tabs" Grid.Row="1" SelectionChanged="OnTabChanged" Padding="0">
-            <TabItem Header="Setup" Theme="{StaticResource TabHeader}">
-                <views:SetupView x:Name="SetupPage" />
+            <TabItem Header="Home" Theme="{StaticResource TabHeader}">
+                <views:HomeView x:Name="HomePage" />
             </TabItem>
             <TabItem Header="Mods" Theme="{StaticResource TabHeader}">
                 <views:ModsView x:Name="ModsPage" />
             </TabItem>
-            <TabItem Header="Get mods" Theme="{StaticResource TabHeader}">
+            <TabItem Header="Browse" Theme="{StaticResource TabHeader}">
                 <views:GetModsView x:Name="GetModsPage" />
             </TabItem>
-            <TabItem Header="Log" Theme="{StaticResource TabHeader}">
-                <views:LogView x:Name="LogPage" />
+            <TabItem Header="Settings" Theme="{StaticResource TabHeader}">
+                <views:SettingsView x:Name="SettingsPage" />
             </TabItem>
         </TabControl>
 

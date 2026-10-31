@@ -23,6 +23,8 @@ env:
   # so a bump is exercised by a normal push before any release depends on it.
   SETUP_REF: v1.0.3
 
+# Tags only, and only v-prefixed ones: the validate step below refuses anything that is not
+# vX.Y.Z, vX.Y.Z-N or vX.Y.Z-beta.N, so this filter and that check say the same thing.
 on:
   push:
     tags: ['v*']
@@ -57,6 +59,64 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.x'
+
+      # The version a tag names says what kind of build it is, so this reads the tag rather than
+      # trusting whoever pushed it:
+      #
+      #   v0.0.0          a release, and it has to be on main
+      #   v0.0.0-1        a hotfix on a release, also on main
+      #   v0.0.0-beta.1   a beta, published as a pre-release
+      #
+      # Every tag carries the leading v. It is not decoration: it is how a tag is told apart from a
+      # bare number, and the version stamping strips it.
+      #
+      # A tag that fits none of those fails here, before anything is built, because a version nobody
+      # can classify is a version nobody can reason about later.
+      - name: Validate the tag and decide the channel
+        id: channel
+        working-directory: Switchboard
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+
+          if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$ ]]; then
+            kind=beta
+          elif [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+)?$ ]]; then
+            kind=release
+          else
+            echo "::error::$tag is not a version this repository publishes."
+            echo "Use vx.y.z for a release, vx.y.z-N for a hotfix, vx.y.z-beta.N for a beta." >&2
+            exit 1
+          fi
+
+          # Release and hotfix commits must be on main, including when updating an existing release.
+          if [[ "$kind" == release ]]; then
+            if ! git fetch --quiet origin main || ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+              echo "::error::$tag is a release tag, and its commit is not on main."
+              exit 1
+            fi
+          fi
+
+          # A release that already exists keeps the channel it was published with. The action updates an
+          # existing release rather than replacing it. Only a release that does not exist yet takes the
+          # computed channel.
+          recorded="$(gh release view "$tag" --json isPrerelease --jq .isPrerelease 2>/dev/null || true)"
+          if [[ -n "$recorded" ]]; then
+            echo "prerelease=$recorded" >> "$GITHUB_OUTPUT"
+            echo "$tag is already published, keeping its channel (prerelease=$recorded)."
+            exit 0
+          fi
+
+          # A beta is a build of a branch. Anything else is a release on main.
+          if [[ "$kind" == release ]]; then
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "Release $tag, on main."
+          else
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "Beta $tag, published as a pre-release."
+          fi
 
       - name: Confirm the tag and the commit agree
         working-directory: Switchboard
@@ -127,3 +187,4 @@ jobs:
             Switchboard/dist/win-x64/Switchboard.exe
           generate_release_notes: true
           draft: false
+          prerelease: ${{ steps.channel.outputs.prerelease }}

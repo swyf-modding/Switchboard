@@ -48,9 +48,8 @@
 
             <Border Grid.Row="0" Classes="rule" VerticalAlignment="Bottom" />
 
-            <ListBox x:Name="List" Grid.Row="1"
-                     SelectionChanged="OnSelectionChanged"
-                     DoubleTapped="OnDoubleClick">
+            <ListBox x:Name="List" DoubleTapped="OnRowActivated" Grid.Row="1"
+                     SelectionChanged="OnSelectionChanged">
                 <ListBox.Styles>
                     <Style Selector="ListBoxItem">
                         <Setter Property="Foreground" Value="{Binding Brush}" />
@@ -115,7 +114,8 @@
             </StackPanel>
 
             <StackPanel Grid.Column="2" Orientation="Horizontal">
-                <Button Content="Rescan" Theme="{StaticResource FlatButton}" Click="OnRescan" />
+                <Button Content="Find mods" Theme="{StaticResource AccentButton}" Click="OnFindMods" />
+                <Button Content="Rescan" Margin="8,0,0,0" Theme="{StaticResource FlatButton}" Click="OnRescan" />
                 <Button Content="Open plugins folder" Margin="8,0,0,0" Theme="{StaticResource FlatButton}" Click="OnOpenPlugins" />
                 <Button Content="Open disabled folder" Margin="8,0,0,0" Theme="{StaticResource FlatButton}" Click="OnOpenDisabled" />
             </StackPanel>

@@ -81,10 +81,10 @@ namespace Switchboard
 
             Title = "Scam With Your Friends - modding " + BuildVersion();
 
-            SetupPage.Host = this;
+            HomePage.Host = this;
             ModsPage.Host = this;
             GetModsPage.Host = this;
-            LogPage.Host = this;
+            SettingsPage.Host = this;
 
             Opened += OnOpened;
         }
@@ -133,8 +133,9 @@ namespace Switchboard
             {
                 State("Ready.");
             }
-            SetupPage.Reload();
+            HomePage.Reload();
             ModsPage.Reload();
+            SettingsPage.Reload();
 
             CheckForSwitchboardUpdate(true);
 
@@ -271,10 +272,10 @@ namespace Switchboard
         {
             switch (index)
             {
-                case 0: SetupPage.Reload(); break;
+                case 0: HomePage.Reload(); break;
                 case 1: ModsPage.Reload(); break;
                 case 2: GetModsPage.OnTabShown(); break;
-                case 3: LogPage.Reload(); break;
+                case 3: SettingsPage.Reload(); break;
             }
         }
 
@@ -287,10 +288,36 @@ namespace Switchboard
         /// tab leaves the Get mods row claiming it is installed, and installing one left that row
         /// unchanged too, which is the kind of thing that makes a person distrust the whole window.
         /// </remarks>
+        /// <summary>Settings, on the repair section, for a caller that came to fix something.</summary>
+        public void OpenSettingsForRepair()
+        {
+            OpenTab(3);
+            SettingsPage.ShowInstall();
+        }
+
+        /// <summary>The Mods tab, with that mod selected rather than the first row.</summary>
+        /// <remarks>
+        /// Queued behind the tab switch rather than called with it. The switch posts its own reload to
+        /// the dispatcher, and that reload selects the first row, so selecting here would be undone by
+        /// it a moment later. Both posts run in order, so this one lands after the reload.
+        /// </remarks>
+        public void OpenModsFor(string path)
+        {
+            OpenTab(1);
+            Dispatcher.UIThread.Post(delegate { ModsPage.SelectByPath(path); }, DispatcherPriority.Background);
+        }
+
+        /// <summary>Switch tabs from inside a page. 0 Home, 1 Mods, 2 Browse, 3 Settings.</summary>
+        public void OpenTab(int index)
+        {
+            if (index >= 0 && index < Tabs.ItemCount) Tabs.SelectedIndex = index;
+        }
+
         public void RefreshModViews()
         {
             ModsPage.Reload();
             GetModsPage.RefreshInstalled();
+            HomePage.Reload();
         }
 
         /// <summary>
@@ -365,10 +392,10 @@ namespace Switchboard
 
             // The whole window, not just the views. A download or a setup run is the one moment where
             // starting a second one would produce two threads writing the same install.
-            SetupPage.IsEnabled = !busy;
+            SettingsPage.IsEnabled = !busy;
             ModsPage.IsEnabled = !busy;
             GetModsPage.IsEnabled = !busy;
-            LogPage.IsEnabled = !busy;
+
             Tabs.IsEnabled = !busy;
             Cursor = busy ? new Cursor(StandardCursorType.Wait) : new Cursor(StandardCursorType.Arrow);
         }

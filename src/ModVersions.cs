@@ -61,6 +61,19 @@ namespace Switchboard
         /// <summary>How many files the entry installs.</summary>
         public int Expected { get; private set; }
 
+        /// <summary>
+        /// Files the entry needs that are not on disk, which is what "partly installed" means.
+        /// </summary>
+        /// <remarks>
+        /// Counted apart from <see cref="Present"/> because the two halves of an entry are not
+        /// equivalent: the shared library in core is shipped by several entries, so finding it says
+        /// nothing about whether this one is installed. Only the entry's own plugin files answer that.
+        /// </remarks>
+        public int Missing { get; private set; }
+
+        /// <summary>Whether the entry's own code is on disk at all.</summary>
+        public bool HasOwnFiles { get; private set; }
+
         /// <summary>How many of them are in the game folder.</summary>
         public int Present { get; private set; }
 
@@ -77,8 +90,18 @@ namespace Switchboard
         /// </summary>
         public string Version { get; private set; }
 
-        /// <summary>Whether anything of this entry is on disk at all.</summary>
-        public bool Any { get { return Present > 0; } }
+        /// <summary>
+        /// Whether this mod is installed: its own code is on disk.
+        /// </summary>
+        /// <remarks>
+        /// The shared library does not count. Most entries ship the same core dll, so a player with
+        /// one mod installed has it for all of them, and treating that as "this one is installed,
+        /// just incomplete" told people they had mods they had never added.
+        /// </remarks>
+        public bool Any { get { return HasOwnFiles; } }
+
+        /// <summary>Installed, but missing a file it needs. The one case worth offering a repair for.</summary>
+        public bool NeedsRepair { get { return HasOwnFiles && Missing > 0; } }
 
         /// <summary>Whether every file the entry installs is there.</summary>
         public bool Complete { get { return Expected > 0 && Present == Expected; } }
@@ -102,9 +125,16 @@ namespace Switchboard
             foreach (var file in source.Files)
             {
                 var path = Path.Combine(ModCatalogue.FolderFor(install, file.Folder), file.FileName);
-                if (!File.Exists(path)) continue;
+                if (!File.Exists(path))
+                {
+                    result.Missing++;
+                    continue;
+                }
 
                 result.Present++;
+
+                // The entry's own code, as opposed to the shared library it may also ship.
+                if (file.Folder == ModFolder.Plugins) result.HasOwnFiles = true;
 
                 // Only a mod's own code, and only what the catalogue can be compared against. The shared
                 // library is skipped: several entries ship their own copy, so whichever was installed

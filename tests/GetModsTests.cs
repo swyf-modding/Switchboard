@@ -43,6 +43,8 @@ namespace Switchboard.Tests
             BepInExVersionRules();
             SwitchboardUpdateRules();
             VersionDeviations();
+            WhatTheBrowseTabOffers();
+            ReleaseIndexRules();
             InstallRequestRules();
             ModConfigFiles();
 
@@ -448,6 +450,25 @@ namespace Switchboard.Tests
                     installed.Version, ScanVersion(plugins, "Thing.dll"));
                 Check("...which is a different version from the library's",
                     installed.Version == ScanVersion(core, "Library.dll"), false);
+
+                // The library on its own is not the mod. Several entries ship the same core dll, so a
+                // player with one of them installed has it for all of them, and calling that "partly
+                // installed" told people they had mods they had never added.
+                File.Delete(pluginPath);
+                var libraryPresent = InstalledMod.Read(source, install, LocalFiles.Read(install));
+                Check("the library alone is not this mod", libraryPresent.Any, false);
+                Check("...so it is not something to repair", libraryPresent.NeedsRepair, false);
+
+                // The mod without the library it needs is the case a repair is for.
+                File.Copy(typeof(GetModsTests).Assembly.Location, pluginPath, true);
+                File.Delete(libraryPath);
+                var missingLibrary = InstalledMod.Read(source, install, LocalFiles.Read(install));
+                Check("the mod is installed", missingLibrary.Any, true);
+                Check("...and it is short of a file", missingLibrary.Missing, 1);
+                Check("...which is what needs repair", missingLibrary.NeedsRepair, true);
+                Check("...and it is not complete", missingLibrary.Complete, false);
+
+                File.Copy(typeof(object).Assembly.Location, libraryPath, true);
 
                 // The shared library's own entry carries no plugin, so the library is the only source.
                 var libraryOnly = new ModSource("mod-lib", "Shared Library", "The library.", new[]
@@ -1241,6 +1262,155 @@ namespace Switchboard.Tests
         {
             Check("'" + current + "' is not told about '" + latest + "'",
                 UpdateChecker.IsUpdateAvailable(current, latest), false);
+        }
+
+        // ---------------------------------------------------------------- what the tab offers
+
+        /// <summary>
+        /// The label on the install button and the word in the status column. Both are decided from
+        /// state and both have been wrong in a review: a button that said "Update to v1.3" installed
+        /// the pin, and "partly installed" counted the shared library as progress.
+        /// </summary>
+        private static void WhatTheBrowseTabOffers()
+        {
+            Section("What the Browse tab offers");
+
+            var pinned = new ModSource("chaos-mode", "Chaos Mode", "x",
+                new[] { new ModFile("ChaosMode.dll", ModFolder.Plugins, true) }, "wcixv", null, "v1.2");
+
+            var unpinned = new ModSource("thing", "Thing", "x",
+                new[] { new ModFile("Thing.dll", ModFolder.Plugins, true) }, "example", null, null);
+
+            Check("an absent mod is a reviewed install",
+                ModActions.AcceptLabel(null, pinned, "v1.2", null), "Install reviewed (v1.2)");
+            Check("an unpinned entry has nothing to review",
+                ModActions.AcceptLabel(null, unpinned, "v1.3", null), "Install (v1.3)");
+
+            var present = Installed(any: true, missing: 0, intact: true, version: "1.2.0");
+            Check("an installed mod that matches the list offers nothing to install",
+                ModActions.CanInstall(present), false);
+            Check("...and says which version is there",
+                ModActions.AcceptLabel(present, pinned, "v1.2", "1.2.0"), "Installed (1.2.0)");
+
+            var repair = Installed(any: true, missing: 1, intact: false, version: "1.2.0");
+            var altered = Installed(any: true, missing: 0, intact: false, version: "1.2.0");
+            Check("a mod missing a file offers a repair",
+                ModActions.CanInstall(repair), true);
+            Check("...by name", ModActions.AcceptLabel(repair, pinned, "v1.2", "1.2.0"), "Repair installation");
+
+            var absent = Installed(any: false, missing: 2, intact: false, version: null);
+            Check("the library alone is still an install", ModActions.CanInstall(absent), true);
+            Check("...not a repair", ModActions.AcceptLabel(absent, pinned, "v1.2", null), "Install reviewed (v1.2)");
+            Check("...and the column says so", ModActions.Status(absent, Versions("v1.2", "v1.3")), "not installed");
+
+            Check("a mod short of a file says which",
+                ModActions.Status(repair, Versions("v1.2", "v1.3")), "needs repair (1 file missing)");
+            Check("altered bytes are called modified",
+                ModActions.Status(altered, Versions("v1.2", "v1.3")), "modified");
+            Check("...and the reviewed release can be put back",
+                ModActions.CanInstall(altered), true);
+            Check("...by name", ModActions.AcceptLabel(altered, pinned, "v1.2", "1.2.0"),
+                "Reinstall reviewed (v1.2)");
+
+            var good = Installed(any: true, missing: 0, intact: true, version: "1.2.0");
+            Check("a current mod says its version",
+                ModActions.Status(good, Versions("v1.2", "v1.2")), "1.2.0 installed");
+            Check("...and mentions a newer release",
+                ModActions.Status(good, Versions("v1.2", "v1.3")), "1.2.0 installed - update to v1.3");
+        }
+
+        /// <summary>An <see cref="InstalledMod"/> in a chosen state, without a game folder.</summary>
+        private static InstalledMod Installed(bool any, int missing, bool intact, string version)
+        {
+            var type = typeof(InstalledMod);
+            var made = System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(type);
+            var flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+            type.GetField("<Missing>k__BackingField", flags).SetValue(made, missing);
+            type.GetField("<HasOwnFiles>k__BackingField", flags).SetValue(made, any);
+            type.GetField("<Version>k__BackingField", flags).SetValue(made, version);
+            type.GetField("<Hashed>k__BackingField", flags).SetValue(made, 1);
+            type.GetField("<Matching>k__BackingField", flags).SetValue(made, intact ? 1 : 0);
+            return (InstalledMod)made;
+        }
+
+        private static ModVersions Versions(string listed, string latest)
+        {
+            var source = new ModSource("thing", "Thing", "x",
+                new[] { new ModFile("Thing.dll", ModFolder.Plugins, true) }, "example", null, listed);
+            return new ModVersions(source, latest, null);
+        }
+
+        // ---------------------------------------------------------------- the release snapshot
+
+        /// <summary>
+        /// The snapshot the catalogue's workflow writes, and the rule that a miss is a miss so the
+        /// caller asks GitHub instead of showing nothing.
+        /// </summary>
+        private static void ReleaseIndexRules()
+        {
+            Section("Release snapshot");
+
+            const string snapshot = @"{
+  ""schemaVersion"": 1,
+  ""generatedAt"": ""2026-10-30T06:17:00Z"",
+  ""mods"": [
+    {
+      ""owner"": ""wcixv"",
+      ""repo"": ""chaos-mode"",
+      ""pinned"": { ""tag"": ""v1.2"", ""asset"": ""ChaosMode-v1.2.zip"", ""url"": ""https://github.com/wcixv/chaos-mode/releases/download/v1.2/ChaosMode-v1.2.zip"", ""size"": 29742, ""sha256"": ""abc"" },
+      ""newest"": { ""tag"": ""v1.3"", ""asset"": ""ChaosMode-v1.3.zip"", ""url"": ""https://github.com/wcixv/chaos-mode/releases/download/v1.3/ChaosMode-v1.3.zip"", ""size"": 31400 }
+    },
+    {
+      ""owner"": ""swyf-modding"",
+      ""repo"": ""Voice-Backend"",
+      ""pinned"": { ""tag"": ""v0.5.0"", ""asset"": ""ScamWYF.VoiceBackend.zip"", ""url"": ""https://github.com/swyf-modding/Voice-Backend/releases/download/v0.5.0/ScamWYF.VoiceBackend.zip"", ""size"": 129600 },
+      ""newest"": null
+    },
+    {
+      ""owner"": ""example"",
+      ""repo"": ""no-zip"",
+      ""pinned"": { ""tag"": ""v1.0.0"", ""asset"": ""notes.txt"", ""url"": ""https://github.com/example/no-zip/releases/download/v1.0.0/notes.txt"", ""size"": 12 },
+      ""newest"": null
+    }
+  ]
+}";
+
+            var index = ReleaseIndex.Parse(snapshot);
+            Check("the snapshot reads", index != null, true);
+            Check("it counts its entries", index.Count, 3);
+            Check("it carries when it was written", index.GeneratedAt != null, true);
+
+            var pinned = new ModSource("chaos-mode", "Chaos Mode", "x",
+                new[] { new ModFile("ChaosMode.dll", ModFolder.Plugins, true) }, "wcixv", null, "v1.2");
+
+            var listed = index.Find(pinned, "v1.2");
+            Check("the pinned release comes from the snapshot", listed.TagName, "v1.2");
+            Check("...with its asset", listed.Package.Name, "ChaosMode-v1.2.zip");
+            Check("...its size", listed.Package.Size, 29742L);
+            Check("...and its digest", listed.Package.Sha256, "abc");
+
+            Check("the newest release comes from the snapshot", index.Find(pinned, null).TagName, "v1.3");
+
+            var repinned = new ModSource("chaos-mode", "Chaos Mode", "x",
+                new[] { new ModFile("ChaosMode.dll", ModFolder.Plugins, true) }, "wcixv", null, "v1.4");
+            Check("a pin the snapshot has not seen is a miss, so the caller asks GitHub",
+                index.Find(repinned, "v1.4"), null);
+
+            var unknown = new ModSource("thing", "Thing", "x",
+                new[] { new ModFile("Thing.dll", ModFolder.Plugins, true) }, "example", null, "v1.0.0");
+            Check("an entry the snapshot does not list is a miss", index.Find(unknown, "v1.0.0"), null);
+
+            Check("a release with no zip is a miss", index.Find(new ModSource("no-zip", "No Zip", "x",
+                new[] { new ModFile("x.dll", ModFolder.Plugins, true) }, "example", null, "v1.0.0"), "v1.0.0"), null);
+
+            var noNewest = new ModSource("Voice-Backend", "Voice Backend", "x",
+                new[] { new ModFile("ScamWYF.VoiceBackend.dll", ModFolder.Plugins, true) }, "swyf-modding", null, "v0.5.0");
+            Check("an entry whose newest release is blank is a miss for newest", index.Find(noNewest, null), null);
+            Check("...and still answers for its pin", index.Find(noNewest, "v0.5.0").TagName, "v0.5.0");
+
+            Check("not JSON is a miss rather than a crash", ReleaseIndex.Parse("<html>rate limited</html>"), null);
+            Check("JSON of the wrong shape is a miss", ReleaseIndex.Parse("{\"mods\": 3}"), null);
+            Check("nothing at all is a miss", ReleaseIndex.Parse(""), null);
         }
 
         // ---------------------------------------------------------------- three versions
