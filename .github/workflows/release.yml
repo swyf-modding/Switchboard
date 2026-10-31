@@ -120,26 +120,46 @@ jobs:
             echo "| Setup ref | $SETUP_REF | |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # A tag on a commit that is not on main is a build of a branch, so it is published as a
-      # pre-release and never becomes the version GitHub offers by default. A tag with a hyphen in it
-      # says the same thing about itself. Doing this by hand after each build is a step that gets
-      # forgotten, and forgetting it makes a branch build look like the release.
-      - name: Decide whether this is a pre-release
+      # The version a tag names says what kind of build it is, so this reads the tag rather than
+      # trusting whoever pushed it:
+      #
+      #   0.0.0           a release, and it has to be on main
+      #   0.0.0-1         a hotfix on a release, also on main
+      #   0.0.0-beta.1    a beta, published as a pre-release
+      #
+      # A tag that fits none of those fails here, before anything is built, because a version nobody
+      # can classify is a version nobody can reason about later.
+      - name: Validate the tag and decide the channel
         id: channel
         working-directory: Switchboard
         run: |
           set -euo pipefail
-          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
-            echo "prerelease=true" >> "$GITHUB_OUTPUT"
-            echo "Pre-release: the tag names one."
-            exit 0
+          tag="$GITHUB_REF_NAME"
+
+          # An optional leading "v" is accepted: the older tags have one, and both have to keep
+          # working for the versions already published.
+          if [[ "$tag" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$ ]]; then
+            kind=beta
+          elif [[ "$tag" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+)?$ ]]; then
+            kind=release
+          else
+            echo "::error::$tag is not a version this repository publishes."
+            echo "Use x.y.z for a release, x.y.z-N for a hotfix, x.y.z-beta.N for a beta." >&2
+            exit 1
           fi
-          if git fetch --quiet origin main && git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+
+          # A beta is a build of a branch. Anything else is a release, and a release that is not on
+          # main is a branch build wearing a release number.
+          if [[ "$kind" == release ]]; then
+            if ! git fetch --quiet origin main || ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+              echo "::error::$tag is a release tag, and its commit is not on main."
+              exit 1
+            fi
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
-            echo "Release: the commit is on main."
+            echo "Release $tag, on main."
           else
             echo "prerelease=true" >> "$GITHUB_OUTPUT"
-            echo "Pre-release: the commit is not on main."
+            echo "Beta $tag, published as a pre-release."
           fi
 
       - uses: softprops/action-gh-release@v2

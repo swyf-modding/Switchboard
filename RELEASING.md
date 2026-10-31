@@ -34,15 +34,38 @@ Publishing a mod before `mod-lib` is on the remote gives you a repo whose `build
 
 ## Cutting a Switchboard release
 
+### What a version means here
+
+The tag says what kind of build it is, and `release.yml` refuses a tag that fits none of these:
+
+| Tag | What it is | Where it may point |
+|---|---|---|
+| `1.2.3` | a release | `main` only |
+| `1.2.3-1` | a hotfix on top of 1.2.3 | `main` only |
+| `1.2.3-beta.1` | a beta | any branch, usually `beta` |
+
+A leading `v` is accepted as well, because the tags already published have one and both spellings
+have to keep working. New tags do not need it.
+
+A beta is published as a pre-release and never becomes the version GitHub offers by default, so the
+number people download only moves when a release says it does. A release tag on a commit that is
+not on `main` fails before anything is built, because a branch build with a release number on it is
+the one mistake here that cannot be undone by deleting a tag.
+
+### Cutting one
+
 Completely automated. From a clean tree:
 
 ```bash
 cd Switchboard
 ./build.sh                 # what CI will do; catch it before the tag
 ./tools/test-getmods.sh    # the offline assertions
-git tag v1.2.3
-git push origin v1.2.3
+git tag 1.2.3-beta.1       # or 1.2.3 for a release, from main
+git push origin 1.2.3-beta.1
 ```
+
+A beta waits for CodeRabbit's review on the pull request to pass before it is tagged. The review has
+found real defects in three separate rounds, and a tag is the point where a fix stops being cheap.
 
 On Windows, `.\build.ps1` and `.\tools\test-getmods.ps1` are the same two commands.
 
@@ -52,7 +75,7 @@ with:
 
 ```bash
 gh run watch --repo swyf-modding/Switchboard
-gh release view v1.2.3 --repo swyf-modding/Switchboard
+gh release view 1.2.3 --repo swyf-modding/Switchboard
 ```
 
 Four gates stand between the tag and the published binary, because a wrong version in a release is worse
@@ -71,7 +94,7 @@ uploading a binary by hand.
 To check a tag exists and points where you expect before pushing it:
 
 ```bash
-gh api repos/swyf-modding/Switchboard/git/ref/tags/v1.2.3
+gh api repos/swyf-modding/Switchboard/git/ref/tags/1.2.3
 ```
 
 ### Setup is pinned, not tracked
