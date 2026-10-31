@@ -75,7 +75,7 @@ with:
 
 ```bash
 gh run watch --repo swyf-modding/Switchboard
-gh release view v1.2.3 --repo swyf-modding/Switchboard
+gh release view v1.2.3-beta.1 --repo swyf-modding/Switchboard   # the tag you pushed
 ```
 
 Four gates stand between the tag and the published binary, because a wrong version in a release is worse
